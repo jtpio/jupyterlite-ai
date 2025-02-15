@@ -839,6 +839,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@huggingface/inference@npm:^3.3.4":
+  version: 3.3.4
+  resolution: "@huggingface/inference@npm:3.3.4"
+  dependencies:
+    "@huggingface/tasks": ^0.15.9
+  checksum: af2a37f1e8a3284f0e1e260cb63aa4436797f944601b889831c372f16961197948cd1801ec555b677f9f1c475d78e96a2cdc4eb9cdde5beb61ba1b041f138322
+  languageName: node
+  linkType: hard
+
+"@huggingface/tasks@npm:^0.15.9":
+  version: 0.15.9
+  resolution: "@huggingface/tasks@npm:0.15.9"
+  checksum: 97e00e00e9589b225a79c9533e52ab4b8f6db3cf932ba9a4fc7a7762217a7d0be661dc606941233abc2ca2d55be4e0d01719cc4838c7b708e06654e6abc964b3
+  languageName: node
+  linkType: hard
+
 "@humanwhocodes/config-array@npm:^0.11.14":
   version: 0.11.14
   resolution: "@humanwhocodes/config-array@npm:0.11.14"
@@ -1950,6 +1966,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jupyterlite/ai@workspace:."
   dependencies:
+    "@huggingface/inference": ^3.3.4
     "@jupyter/chat": ^0.7.1
     "@jupyterlab/application": ^4.4.0-alpha.0
     "@jupyterlab/apputils": ^4.5.0-alpha.0

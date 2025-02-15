@@ -35,6 +35,10 @@ const providers = {
     path: 'node_modules/@langchain/community/experimental/llms/chrome_ai.d.ts',
     type: 'ChromeAIInputs'
   },
+  huggingfaceHub: {
+    path: 'node_modules/@langchain/community/llms/hf.d.ts',
+    type: 'HFInput'
+  },
   mistralAI: {
     path: 'node_modules/@langchain/mistralai/dist/chat_models.d.ts',
     type: 'ChatMistralAIInput'

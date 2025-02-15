@@ -135,9 +135,9 @@ export class ChatHandler extends ChatModel {
 
     try {
       for await (const chunk of await this._aiProvider.chatModel.stream(
-        messages
+        msg.body
       )) {
-        content += chunk.content;
+        content += chunk.content ?? chunk;
         botMsg.body = content;
         this.messageAdded(botMsg);
       }

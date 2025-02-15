@@ -2,6 +2,7 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { ChromeAI } from '@langchain/community/experimental/llms/chrome_ai';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatMistralAI } from '@langchain/mistralai';
+import { HuggingFaceInference } from '@langchain/community/llms/hf';
 import { JSONObject } from '@lumino/coreutils';
 
 import { IBaseCompleter } from './base-completer';
@@ -13,6 +14,7 @@ import { ChromeCompleter } from './chrome-completer';
 import chromeAI from '../_provider-settings/chromeAI.json';
 import mistralAI from '../_provider-settings/mistralAI.json';
 import anthropic from '../_provider-settings/anthropic.json';
+import huggingfaceHub from '../_provider-settings/huggingfaceHub.json';
 
 /**
  * Get an LLM completer from the name.
@@ -46,6 +48,10 @@ export function getChatModel(
     // TODO: fix
     // @ts-expect-error: missing properties
     return new ChromeAI({ ...settings });
+  } else if (name === 'HuggingFaceHub') {
+    // TODO: fix
+    // @ts-expect-error: missing properties
+    return new HuggingFaceInference({ ...settings });
   }
   return null;
 }
@@ -60,6 +66,8 @@ export function getErrorMessage(name: string, error: any): string {
     return error.error.error.message;
   } else if (name === 'ChromeAI') {
     return error.message;
+  } else if (name === 'HuggingFaceHub') {
+    return error.error.message;
   }
   return 'Unknown provider';
 }
@@ -74,6 +82,8 @@ export function getSettings(name: string): JSONObject | null {
     return anthropic.definitions.AnthropicInput.properties;
   } else if (name === 'ChromeAI') {
     return chromeAI.definitions.ChromeAIInputs.properties;
+  } else if (name === 'HuggingFaceHub') {
+    return huggingfaceHub.definitions.HFInput.properties;
   }
 
   return null;
