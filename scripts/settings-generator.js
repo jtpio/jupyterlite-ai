@@ -43,6 +43,12 @@ const providers = {
     path: 'node_modules/@langchain/anthropic/dist/chat_models.d.ts',
     type: 'AnthropicInput',
     excludedProps: ['clientOptions']
+  },
+  webLLM: {
+    path: 'node_modules/@langchain/community/chat_models/webllm.d.ts',
+    type: 'WebLLMInputs',
+    // TODO: re-enable?
+    excludedProps: ['appConfig', 'chatOptions']
   }
 };
 

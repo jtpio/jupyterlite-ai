@@ -1,18 +1,21 @@
 import { ChatAnthropic } from '@langchain/anthropic';
+import { ChatWebLLM } from '@langchain/community/chat_models/webllm';
 import { ChromeAI } from '@langchain/community/experimental/llms/chrome_ai';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatMistralAI } from '@langchain/mistralai';
 import { JSONObject } from '@lumino/coreutils';
 
-import { IBaseCompleter } from './base-completer';
-import { AnthropicCompleter } from './anthropic-completer';
-import { CodestralCompleter } from './codestral-completer';
 import { ReadonlyPartialJSONObject } from '@lumino/coreutils';
+import { AnthropicCompleter } from './anthropic-completer';
+import { IBaseCompleter } from './base-completer';
 import { ChromeCompleter } from './chrome-completer';
+import { CodestralCompleter } from './codestral-completer';
+// import { WebLLMCompleter } from './webllm-completer';
 
+import anthropic from '../_provider-settings/anthropic.json';
 import chromeAI from '../_provider-settings/chromeAI.json';
 import mistralAI from '../_provider-settings/mistralAI.json';
-import anthropic from '../_provider-settings/anthropic.json';
+import webLLM from '../_provider-settings/webLLM.json';
 
 /**
  * Get an LLM completer from the name.
@@ -28,6 +31,9 @@ export function getCompleter(
   } else if (name === 'ChromeAI') {
     return new ChromeCompleter({ settings });
   }
+  // } else if (name === 'WebLLM') {
+  //   return new WebLLMCompleter({ settings });
+  // }
   return null;
 }
 
@@ -46,6 +52,9 @@ export function getChatModel(
     // TODO: fix
     // @ts-expect-error: missing properties
     return new ChromeAI({ ...settings });
+  } else if (name === 'WebLLM') {
+    // @ts-expect-error: missing properties
+    return new ChatWebLLM({ ...settings });
   }
   return null;
 }
@@ -59,6 +68,8 @@ export function getErrorMessage(name: string, error: any): string {
   } else if (name === 'Anthropic') {
     return error.error.error.message;
   } else if (name === 'ChromeAI') {
+    return error.message;
+  } else if (name === 'WebLLM') {
     return error.message;
   }
   return 'Unknown provider';
@@ -74,6 +85,8 @@ export function getSettings(name: string): JSONObject | null {
     return anthropic.definitions.AnthropicInput.properties;
   } else if (name === 'ChromeAI') {
     return chromeAI.definitions.ChromeAIInputs.properties;
+  } else if (name === 'WebLLM') {
+    return webLLM.definitions.WebLLMInputs.properties;
   }
 
   return null;
