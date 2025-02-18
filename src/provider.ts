@@ -34,6 +34,7 @@ Only give raw strings back, do not format the response using backticks.
 The output should be a single string, and should correspond to what a human users
 would write.
 Do not include the prompt in the output, only the string that should be appended to the current input.
+Do not include the entire user message in the response, just the part to autocomplete.
 `;
 
 export class AIProvider implements IAIProvider {

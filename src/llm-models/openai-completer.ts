@@ -6,14 +6,17 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, SystemMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
-import { BaseCompleter, IBaseCompleter } from './base-completer';
 import { COMPLETION_SYSTEM_PROMPT } from '../provider';
+import { BaseCompleter, IBaseCompleter } from './base-completer';
 
 export class OpenAICompleter implements IBaseCompleter {
   constructor(options: BaseCompleter.IOptions) {
     this._openAIProvider = new ChatOpenAI({ ...options.settings });
   }
 
+  /**
+   * Get the underlying provider.
+   */
   get provider(): BaseChatModel {
     return this._openAIProvider;
   }
