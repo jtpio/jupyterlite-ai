@@ -15,6 +15,7 @@ import { AnthropicCompleter } from './Anthropic/completer';
 import { ChromeCompleter } from './ChromeAI/completer';
 import { CodestralCompleter } from './MistralAI/completer';
 import { OpenAICompleter } from './OpenAI/completer';
+// import { WebLLMCompleter } from './WebLLM/completer';
 
 // Import Settings
 import AnthropicSettings from './Anthropic/settings-schema.json';
@@ -26,7 +27,6 @@ import WebLLMSettings from './WebLLM/settings-schema.json';
 // Import instructions
 import ChromeAIInstructions from './ChromeAI/instructions';
 import MistralAIInstructions from './MistralAI/instructions';
-import { WebLLMCompleter } from './WebLLM/completer';
 
 // Build the AIProvider list
 const AIProviders: IAIProvider[] = [
@@ -62,7 +62,7 @@ const AIProviders: IAIProvider[] = [
   {
     name: 'WebLLM',
     chatModel: ChatWebLLM,
-    completer: WebLLMCompleter,
+    // completer: WebLLMCompleter,
     settingsSchema: WebLLMSettings
   }
 ];

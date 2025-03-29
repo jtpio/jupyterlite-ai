@@ -178,15 +178,7 @@ const providerRegistryPlugin: JupyterFrontEndPlugin<IAIProviderRegistry> = {
           });
 
           const provider = providerRegistry.currentName;
-          const chatError = providerRegistry.chatError;
           const chatModel = providerRegistry.currentChatModel;
-
-          if (chatModel === null) {
-            Notification.emit(chatError, 'error', {
-              autoClose: 2000
-            });
-            return;
-          }
 
           // TODO: implement a proper way to handle models that may need to be initialized before being used.
           // Mostly applies to WebLLM and ChromeAI as they may need to download the model in the browser first.
