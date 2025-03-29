@@ -6,6 +6,7 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { ChromeAI } from '@langchain/community/experimental/llms/chrome_ai';
 import { ChatMistralAI } from '@langchain/mistralai';
 import { ChatOpenAI } from '@langchain/openai';
+import { ChatWebLLM } from '@langchain/community/chat_models/webllm';
 
 import { IAIProvider, IAIProviderRegistry } from '../tokens';
 
@@ -20,10 +21,12 @@ import AnthropicSettings from './Anthropic/settings-schema.json';
 import ChromeAISettings from './ChromeAI/settings-schema.json';
 import MistralAISettings from './MistralAI/settings-schema.json';
 import OpenAISettings from './OpenAI/settings-schema.json';
+import WebLLMSettings from './WebLLM/settings-schema.json';
 
 // Import instructions
 import ChromeAIInstructions from './ChromeAI/instructions';
 import MistralAIInstructions from './MistralAI/instructions';
+import { WebLLMCompleter } from './WebLLM/completer';
 
 // Build the AIProvider list
 const AIProviders: IAIProvider[] = [
@@ -55,6 +58,12 @@ const AIProviders: IAIProvider[] = [
     chatModel: ChatOpenAI,
     completer: OpenAICompleter,
     settingsSchema: OpenAISettings
+  },
+  {
+    name: 'WebLLM',
+    chatModel: ChatWebLLM,
+    completer: WebLLMCompleter,
+    settingsSchema: WebLLMSettings
   }
 ];
 

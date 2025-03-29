@@ -129,6 +129,7 @@ export class AiSettings extends React.Component<
     }
 
     await this._secretsManager.detachAll(SECRETS_NAMESPACE);
+    // @ts-expect-error: TS2488
     this._formInputs = [...inputs];
     this._unsavedFields = [];
     for (let i = 0; i < inputs.length; i++) {

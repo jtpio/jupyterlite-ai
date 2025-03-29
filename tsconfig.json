@@ -5,6 +5,7 @@
     "declaration": true,
     "esModuleInterop": true,
     "incremental": true,
+    "lib": ["ES2018", "WebWorker", "DOM"],
     "jsx": "react",
     "module": "esnext",
     "moduleResolution": "node",
@@ -15,6 +16,7 @@
     "resolveJsonModule": true,
     "outDir": "lib",
     "rootDir": "src",
+    "skipLibCheck": true,
     "strict": true,
     "strictNullChecks": true,
     "target": "ES2018"
