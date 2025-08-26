@@ -25,7 +25,10 @@ import {
 } from '@langchain/core/messages';
 import { UUID } from '@lumino/coreutils';
 
-import { DEFAULT_CHAT_SYSTEM_PROMPT } from './default-prompts';
+import {
+  DEFAULT_CHAT_SYSTEM_PROMPT,
+  DEFAULT_AGENT_SYSTEM_PROMPT
+} from './default-prompts';
 import { jupyternautLiteIcon } from './icons';
 import { IAIProviderRegistry, IToolRegistry } from './tokens';
 import { AIChatModel } from './types/ai-model';
@@ -37,9 +40,29 @@ import { AIChatModel } from './types/ai-model';
 const AI_AVATAR_BASE64 = btoa(jupyternautLiteIcon.svgstr);
 const AI_AVATAR = `data:image/svg+xml;base64,${AI_AVATAR_BASE64}`;
 
-export const welcomeMessage = (providers: string[]) => `
-#### Ask JupyterLite AI
+export const welcomeMessage = (
+  providers: string[],
+  hasAgent: boolean = false
+) => `
+#### ${hasAgent ? '🤖 JupyterLite AI Agent' : 'Ask JupyterLite AI'}
 
+${
+  hasAgent
+    ? `
+**✨ I'm your AI coding assistant with enhanced capabilities!**
+
+I can actively help you with:
+- 📊 **Notebook operations** - Create, edit, and run cells
+- 📁 **File management** - Create, edit, and organize files
+- 🧠 **Code development** - Write, debug, and optimize Python code
+- 🔧 **Interactive assistance** - Execute tasks directly in your environment
+
+Just ask me to help with your data science, research, or development work!
+
+---
+`
+    : ''
+}
 
 The provider to use can be set in the <button data-commandLinker-command="settingeditor:open" data-commandLinker-args='{"query": "AI provider"}' href="#">settings editor</button>, by selecting it from
 the <img src="${AI_AVATAR}" width="16" height="16"> _AI provider_ settings.
@@ -114,6 +137,13 @@ export class ChatHandler extends AbstractChatModel {
    * Get the system prompt for the chat.
    */
   get systemPrompt(): string {
+    // Use agent-specific prompt when agent is available
+    if (this.agent !== null) {
+      return DEFAULT_AGENT_SYSTEM_PROMPT.replaceAll(
+        '$provider_name$',
+        this._providerRegistry.currentName('chat')
+      );
+    }
     return (
       this._providerRegistry.chatSystemPrompt ?? DEFAULT_CHAT_SYSTEM_PROMPT
     );
@@ -235,7 +265,57 @@ export class ChatHandler extends AbstractChatModel {
   ): Promise<boolean> {
     this._controller = new AbortController();
     let finalResponse = '';
-    
+    const currentMessageId = UUID.uuid4();
+    let messageContent = '';
+    const chronologicalItems: Array<{
+      type: 'tool_call' | 'tool_result' | 'thinking';
+      data: any;
+      timestamp: number;
+    }> = [];
+    let isStreaming = false;
+
+    const updateMessage = () => {
+      // Sort items by timestamp to maintain chronological order
+      const sortedItems = [...chronologicalItems].sort(
+        (a, b) => a.timestamp - b.timestamp
+      );
+
+      const chronologicalSection = sortedItems
+        .map(item => {
+          switch (item.type) {
+            case 'tool_call':
+              return `<details class="jp-ai-tool-call">\n<summary>🔧 <strong>Using tool: ${item.data.name}</strong></summary>\n\n\`\`\`json\n${JSON.stringify(item.data.args, null, 2)}\n\`\`\`\n</details>\n\n`;
+            case 'tool_result':
+              try {
+                const contentData = JSON.parse(item.data.content);
+                const title =
+                  contentData.command || item.data.name || 'Tool Result';
+                return `<details class="jp-ai-tool-result">\n<summary>📋 <strong>${title}</strong></summary>\n\n\`\`\`\n${item.data.content}\n\`\`\`\n</details>\n\n`;
+              } catch {
+                const title = item.data.name || 'Tool Result';
+                return `<details class="jp-ai-tool-result">\n<summary>📋 <strong>${title}</strong></summary>\n\n\`\`\`\n${item.data.content}\n\`\`\`\n</details>\n\n`;
+              }
+            case 'thinking':
+              return chronologicalItems.length === 1
+                ? item.data.content // Show thinking directly if it's the only content
+                : `<details class="jp-ai-thinking" ${chronologicalItems.filter(i => i.type !== 'thinking').length === 0 ? 'open' : ''}>\n<summary>💭 <strong>Thinking</strong></summary>\n\n${item.data.content}\n</details>\n\n`;
+            default:
+              return '';
+          }
+        })
+        .join('');
+
+      const finalContent = chronologicalSection + finalResponse;
+
+      this.messageAdded({
+        id: currentMessageId,
+        body: finalContent || (isStreaming ? '_AI is thinking..._' : ''),
+        sender,
+        time: Private.getTimestampMs(),
+        type: 'msg'
+      });
+    };
+
     try {
       for await (const chunk of await agent.stream(
         { messages },
@@ -248,23 +328,25 @@ export class ChatHandler extends AbstractChatModel {
           const agentMessages = (chunk as any).agent.messages;
           agentMessages.forEach((message: BaseMessage) => {
             this._history.push(message);
-            
+
             if (message instanceof AIMessage) {
               // Handle AI messages with tool calls
-              if ((message as any).tool_calls && (message as any).tool_calls.length > 0) {
-                const toolCalls = (message as any).tool_calls;
-                toolCalls.forEach((toolCall: any) => {
-                  const callMessage = `🔧 **Calling tool: ${toolCall.name}**\n\`\`\`json\n${JSON.stringify(toolCall.args, null, 2)}\n\`\`\``;
-                  this.messageAdded({
-                    id: UUID.uuid4(),
-                    body: callMessage,
-                    sender: { username: 'AI (Tool Call)', avatar_url: sender.avatar_url },
-                    time: Private.getTimestampMs(),
-                    type: 'msg'
+              if (
+                (message as any).tool_calls &&
+                (message as any).tool_calls.length > 0
+              ) {
+                const newToolCalls = (message as any).tool_calls;
+                newToolCalls.forEach((toolCall: any) => {
+                  chronologicalItems.push({
+                    type: 'tool_call',
+                    data: toolCall,
+                    timestamp: Date.now()
                   });
                 });
+                isStreaming = true;
+                updateMessage();
               }
-              
+
               // Handle regular AI message content
               if (message.content) {
                 const contents: string[] = [];
@@ -279,41 +361,50 @@ export class ChatHandler extends AbstractChatModel {
                 }
                 contents.forEach(content => {
                   if (content.trim()) {
-                    finalResponse = content;
-                    this.messageAdded({
-                      id: UUID.uuid4(),
-                      body: content,
-                      sender,
-                      time: Private.getTimestampMs(),
-                      type: 'msg'
-                    });
+                    if (
+                      chronologicalItems.some(
+                        item =>
+                          item.type === 'tool_call' ||
+                          item.type === 'tool_result'
+                      )
+                    ) {
+                      // This is thinking content, add it to chronological items
+                      messageContent += content;
+                      // Update or add thinking item
+                      const existingThinking = chronologicalItems.find(
+                        item => item.type === 'thinking'
+                      );
+                      if (existingThinking) {
+                        existingThinking.data.content = messageContent;
+                      } else {
+                        chronologicalItems.push({
+                          type: 'thinking',
+                          data: { content: messageContent },
+                          timestamp: Date.now()
+                        });
+                      }
+                    } else {
+                      // This is the final response
+                      finalResponse += content;
+                    }
+                    isStreaming = true;
+                    updateMessage();
                   }
                 });
               }
             } else if (message instanceof ToolMessage) {
               // Handle tool response messages
               const content = message.content as string;
-              try {
-                const contentData = JSON.parse(content);
-                const title = contentData.command ? contentData.command : 'Tool Response';
-                const body = `<details><summary>📋 ${title}</summary><pre>${content}</pre></details>`;
-                this.messageAdded({
-                  id: UUID.uuid4(),
-                  body,
-                  sender: { username: `Tool Result`, avatar_url: '🛠️' },
-                  time: Private.getTimestampMs(),
-                  type: 'msg'
-                });
-              } catch {
-                // If content is not JSON, display as plain text
-                this.messageAdded({
-                  id: UUID.uuid4(),
-                  body: `📋 **Tool Result:**\n\`\`\`\n${content}\n\`\`\``,
-                  sender: { username: `Tool Result`, avatar_url: '🛠️' },
-                  time: Private.getTimestampMs(),
-                  type: 'msg'
-                });
-              }
+              chronologicalItems.push({
+                type: 'tool_result',
+                data: {
+                  name: (message as any).name || 'Unknown',
+                  content: content
+                },
+                timestamp: Date.now()
+              });
+              isStreaming = true;
+              updateMessage();
             }
           });
         } else if ((chunk as any).tools) {
@@ -322,43 +413,23 @@ export class ChatHandler extends AbstractChatModel {
             this._history.push(message);
             if (message instanceof ToolMessage) {
               const content = message.content as string;
-              try {
-                const contentData = JSON.parse(content);
-                const title = contentData.command ? contentData.command : 'Tool Execution';
-                const body = `<details><summary>⚡ ${title}</summary><pre>${content}</pre></details>`;
-                this.messageAdded({
-                  id: UUID.uuid4(),
-                  body,
-                  sender: { username: `Tool "${(message as any).name || 'Unknown'}"`, avatar_url: '🔧' },
-                  time: Private.getTimestampMs(),
-                  type: 'msg'
-                });
-              } catch {
-                // If content is not JSON, display as plain text
-                this.messageAdded({
-                  id: UUID.uuid4(),
-                  body: `⚡ **Tool Execution:**\n\`\`\`\n${content}\n\`\`\``,
-                  sender: { username: `Tool "${(message as any).name || 'Unknown'}"`, avatar_url: '🔧' },
-                  time: Private.getTimestampMs(),
-                  type: 'msg'
-                });
-              }
+              chronologicalItems.push({
+                type: 'tool_result',
+                data: {
+                  name: (message as any).name || 'Unknown',
+                  content: content
+                },
+                timestamp: Date.now()
+              });
+              isStreaming = true;
+              updateMessage();
             }
           });
         }
       }
-      
-      // Add completion message if we had a final response
-      if (finalResponse.trim()) {
-        this.messageAdded({
-          id: UUID.uuid4(),
-          body: '✅ **Request completed successfully!**',
-          sender: { username: 'AI (Done)', avatar_url: sender.avatar_url },
-          time: Private.getTimestampMs(),
-          type: 'msg'
-        });
-      }
-      
+
+      // Final update to ensure everything is rendered
+      updateMessage();
       return true;
     } catch (reason) {
       const error = this._providerRegistry.formatErrorMessage(reason);

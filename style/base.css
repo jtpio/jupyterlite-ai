@@ -48,3 +48,136 @@
   border-color: var(--jp-brand-color1);
   color: var(--jp-brand-color1);
 }
+
+/* AI Tool Call and Result Styling */
+.jp-ai-tool-call,
+.jp-ai-tool-result,
+.jp-ai-thinking {
+  margin: 8px 0;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: var(--jp-border-radius);
+  overflow: hidden;
+  background: var(--jp-layout-color0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.jp-ai-tool-call:hover,
+.jp-ai-tool-result:hover,
+.jp-ai-thinking:hover {
+  border-color: var(--jp-brand-color2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.jp-ai-tool-call > summary,
+.jp-ai-tool-result > summary,
+.jp-ai-thinking > summary {
+  padding: 8px 12px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s ease;
+}
+
+.jp-ai-tool-call > summary:hover,
+.jp-ai-tool-result > summary:hover,
+.jp-ai-thinking > summary:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-ai-tool-call[open] > summary,
+.jp-ai-tool-result[open] > summary,
+.jp-ai-thinking[open] > summary {
+  border-bottom-color: var(--jp-border-color2);
+}
+
+.jp-ai-tool-call > summary::marker,
+.jp-ai-tool-result > summary::marker,
+.jp-ai-thinking > summary::marker {
+  content: '';
+}
+
+.jp-ai-tool-call > summary::before,
+.jp-ai-tool-result > summary::before,
+.jp-ai-thinking > summary::before {
+  content: '▶';
+  margin-right: 6px;
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-ai-tool-call[open] > summary::before,
+.jp-ai-tool-result[open] > summary::before,
+.jp-ai-thinking[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+/* Specific styling for different block types */
+.jp-ai-tool-call {
+  border-left: 3px solid var(--jp-warn-color1);
+}
+
+.jp-ai-tool-result {
+  border-left: 3px solid var(--jp-success-color1);
+}
+
+.jp-ai-thinking {
+  border-left: 3px solid var(--jp-info-color1);
+}
+
+.jp-ai-tool-call > summary {
+  background: rgba(var(--jp-warn-color1-rgb), 0.05);
+}
+
+.jp-ai-tool-result > summary {
+  background: rgba(var(--jp-success-color1-rgb), 0.05);
+}
+
+.jp-ai-thinking > summary {
+  background: rgba(var(--jp-info-color1-rgb), 0.05);
+}
+
+/* Content inside the details */
+.jp-ai-tool-call pre,
+.jp-ai-tool-result pre,
+.jp-ai-thinking pre {
+  margin: 0;
+  padding: 12px;
+  background: var(--jp-layout-color0);
+  border: none;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: var(--jp-code-line-height);
+  overflow-x: auto;
+}
+
+.jp-ai-tool-call .jp-RenderedMarkdown,
+.jp-ai-tool-result .jp-RenderedMarkdown,
+.jp-ai-thinking .jp-RenderedMarkdown {
+  padding: 12px;
+}
+
+/* Animation for opening/closing */
+@keyframes expandDetails {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 500px;
+    opacity: 1;
+  }
+}
+
+.jp-ai-tool-call[open],
+.jp-ai-tool-result[open],
+.jp-ai-thinking[open] {
+  animation: expandDetails 0.3s ease-out;
+}

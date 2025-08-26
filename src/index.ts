@@ -170,7 +170,10 @@ const chatPlugin: JupyterFrontEndPlugin<void> = {
         rmRegistry,
         chatCommandRegistry,
         inputToolbarRegistry,
-        welcomeMessage: welcomeMessage(providerRegistry.providers)
+        welcomeMessage: welcomeMessage(
+          providerRegistry.providers,
+          chatHandler.agent !== null
+        )
       });
     } catch (e) {
       chatWidget = buildErrorWidget(themeManager);
