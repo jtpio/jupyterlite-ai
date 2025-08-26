@@ -62,6 +62,14 @@ export function toolSelect(
     };
   }, [toolRegistry]);
 
+  // Auto-select all tools when tools are available
+  useEffect(() => {
+    if (tools.length > 0 && selectedTools.length === 0) {
+      setSelectedTools(tools);
+      providerRegistry.setTools(tools);
+    }
+  }, [tools, selectedTools.length, providerRegistry]);
+
   useEffect(() => {
     const updateAllowTools = (_: IAIProviderRegistry, value: boolean) =>
       setAllowTools(value);

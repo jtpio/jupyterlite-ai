@@ -20,7 +20,8 @@ import {
   BaseMessage,
   HumanMessage,
   mergeMessageRuns,
-  SystemMessage
+  SystemMessage,
+  ToolMessage
 } from '@langchain/core/messages';
 import { UUID } from '@lumino/coreutils';
 
@@ -233,6 +234,8 @@ export class ChatHandler extends AbstractChatModel {
     sender: IUser
   ): Promise<boolean> {
     this._controller = new AbortController();
+    let finalResponse = '';
+    
     try {
       for await (const chunk of await agent.stream(
         { messages },
@@ -242,49 +245,120 @@ export class ChatHandler extends AbstractChatModel {
         }
       )) {
         if ((chunk as any).agent) {
-          messages = (chunk as any).agent.messages;
-          messages.forEach(message => {
+          const agentMessages = (chunk as any).agent.messages;
+          agentMessages.forEach((message: BaseMessage) => {
             this._history.push(message);
-            const contents: string[] = [];
-            if (typeof message.content === 'string') {
-              contents.push(message.content);
-            } else if (Array.isArray(message.content)) {
-              message.content.forEach(content => {
-                if (content.type === 'text') {
-                  contents.push(content.text);
+            
+            if (message instanceof AIMessage) {
+              // Handle AI messages with tool calls
+              if ((message as any).tool_calls && (message as any).tool_calls.length > 0) {
+                const toolCalls = (message as any).tool_calls;
+                toolCalls.forEach((toolCall: any) => {
+                  const callMessage = `🔧 **Calling tool: ${toolCall.name}**\n\`\`\`json\n${JSON.stringify(toolCall.args, null, 2)}\n\`\`\``;
+                  this.messageAdded({
+                    id: UUID.uuid4(),
+                    body: callMessage,
+                    sender: { username: 'AI (Tool Call)', avatar_url: sender.avatar_url },
+                    time: Private.getTimestampMs(),
+                    type: 'msg'
+                  });
+                });
+              }
+              
+              // Handle regular AI message content
+              if (message.content) {
+                const contents: string[] = [];
+                if (typeof message.content === 'string') {
+                  contents.push(message.content);
+                } else if (Array.isArray(message.content)) {
+                  message.content.forEach(content => {
+                    if (content.type === 'text') {
+                      contents.push(content.text);
+                    }
+                  });
                 }
-              });
+                contents.forEach(content => {
+                  if (content.trim()) {
+                    finalResponse = content;
+                    this.messageAdded({
+                      id: UUID.uuid4(),
+                      body: content,
+                      sender,
+                      time: Private.getTimestampMs(),
+                      type: 'msg'
+                    });
+                  }
+                });
+              }
+            } else if (message instanceof ToolMessage) {
+              // Handle tool response messages
+              const content = message.content as string;
+              try {
+                const contentData = JSON.parse(content);
+                const title = contentData.command ? contentData.command : 'Tool Response';
+                const body = `<details><summary>📋 ${title}</summary><pre>${content}</pre></details>`;
+                this.messageAdded({
+                  id: UUID.uuid4(),
+                  body,
+                  sender: { username: `Tool Result`, avatar_url: '🛠️' },
+                  time: Private.getTimestampMs(),
+                  type: 'msg'
+                });
+              } catch {
+                // If content is not JSON, display as plain text
+                this.messageAdded({
+                  id: UUID.uuid4(),
+                  body: `📋 **Tool Result:**\n\`\`\`\n${content}\n\`\`\``,
+                  sender: { username: `Tool Result`, avatar_url: '🛠️' },
+                  time: Private.getTimestampMs(),
+                  type: 'msg'
+                });
+              }
             }
-            contents.forEach(content => {
-              this.messageAdded({
-                id: UUID.uuid4(),
-                body: content,
-                sender,
-                time: Private.getTimestampMs(),
-                type: 'msg'
-              });
-            });
           });
         } else if ((chunk as any).tools) {
-          messages = (chunk as any).tools.messages;
-          messages.forEach(message => {
+          const toolMessages = (chunk as any).tools.messages;
+          toolMessages.forEach((message: BaseMessage) => {
             this._history.push(message);
-            const content = message.content as string;
-            const contentData = JSON.parse(content);
-            const title = contentData.command
-              ? contentData.command
-              : 'Show details';
-            const body = `<details><summary>${title}</summary><pre>${content}</pre></details>`;
-            this.messageAdded({
-              id: UUID.uuid4(),
-              body,
-              sender: { username: `Tool "${message.name}"` },
-              time: Private.getTimestampMs(),
-              type: 'msg'
-            });
+            if (message instanceof ToolMessage) {
+              const content = message.content as string;
+              try {
+                const contentData = JSON.parse(content);
+                const title = contentData.command ? contentData.command : 'Tool Execution';
+                const body = `<details><summary>⚡ ${title}</summary><pre>${content}</pre></details>`;
+                this.messageAdded({
+                  id: UUID.uuid4(),
+                  body,
+                  sender: { username: `Tool "${(message as any).name || 'Unknown'}"`, avatar_url: '🔧' },
+                  time: Private.getTimestampMs(),
+                  type: 'msg'
+                });
+              } catch {
+                // If content is not JSON, display as plain text
+                this.messageAdded({
+                  id: UUID.uuid4(),
+                  body: `⚡ **Tool Execution:**\n\`\`\`\n${content}\n\`\`\``,
+                  sender: { username: `Tool "${(message as any).name || 'Unknown'}"`, avatar_url: '🔧' },
+                  time: Private.getTimestampMs(),
+                  type: 'msg'
+                });
+              }
+            }
           });
         }
       }
+      
+      // Add completion message if we had a final response
+      if (finalResponse.trim()) {
+        this.messageAdded({
+          id: UUID.uuid4(),
+          body: '✅ **Request completed successfully!**',
+          sender: { username: 'AI (Done)', avatar_url: sender.avatar_url },
+          time: Private.getTimestampMs(),
+          type: 'msg'
+        });
+      }
+      
       return true;
     } catch (reason) {
       const error = this._providerRegistry.formatErrorMessage(reason);

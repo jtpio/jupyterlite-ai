@@ -30,6 +30,7 @@ import { aiSettingsRenderer, textArea } from './settings';
 import { IAIProviderRegistry, IToolRegistry, PLUGIN_IDS } from './tokens';
 import { ToolsRegistry } from './tool-registry';
 import { notebook } from './tools/notebook';
+import { createHighLevelTools } from './tools/high-level-tools';
 
 const chatCommandRegistryPlugin: JupyterFrontEndPlugin<IChatCommandRegistry> = {
   id: PLUGIN_IDS.chatCommandRegistry,
@@ -211,7 +212,7 @@ const providerRegistryPlugin: JupyterFrontEndPlugin<IAIProviderRegistry> =
     optional: [IRenderMimeRegistry, ISecretsManager],
     provides: IAIProviderRegistry,
     activate: (
-      app: JupyterFrontEnd,
+      _app: JupyterFrontEnd,
       editorRegistry: IFormRendererRegistry,
       settingRegistry: ISettingRegistry,
       rmRegistry?: IRenderMimeRegistry,
@@ -344,7 +345,14 @@ const toolRegistryPlugin: JupyterFrontEndPlugin<IToolRegistry> = {
   provides: IToolRegistry,
   activate: (app: JupyterFrontEnd): IToolRegistry => {
     const registry = new ToolsRegistry();
+
+    // Add the original notebook tool (low-level JupyterLab commands)
     registry.add(notebook(app.commands));
+
+    // Add all high-level tools
+    const highLevelTools = createHighLevelTools(app.commands);
+    highLevelTools.forEach(tool => registry.add(tool));
+
     return registry;
   }
 };
