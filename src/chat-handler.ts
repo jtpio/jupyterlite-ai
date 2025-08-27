@@ -284,21 +284,21 @@ export class ChatHandler extends AbstractChatModel {
         .map(item => {
           switch (item.type) {
             case 'tool_call':
-              return `<details class="jp-ai-tool-call">\n<summary>🔧 <strong>Using tool: ${item.data.name}</strong></summary>\n\n\`\`\`json\n${JSON.stringify(item.data.args, null, 2)}\n\`\`\`\n</details>\n\n`;
+              return `<details class="jp-ai-tool-call">\n<summary><strong>Using tool: ${item.data.name}</strong></summary>\n\n\`\`\`json\n${JSON.stringify(item.data.args, null, 2)}\n\`\`\`\n</details>\n\n`;
             case 'tool_result':
               try {
                 const contentData = JSON.parse(item.data.content);
                 const title =
                   contentData.command || item.data.name || 'Tool Result';
-                return `<details class="jp-ai-tool-result">\n<summary>📋 <strong>${title}</strong></summary>\n\n\`\`\`\n${item.data.content}\n\`\`\`\n</details>\n\n`;
+                return `<details class="jp-ai-tool-result">\n<summary><strong>${title}</strong></summary>\n\n\`\`\`\n${item.data.content}\n\`\`\`\n</details>\n\n`;
               } catch {
                 const title = item.data.name || 'Tool Result';
-                return `<details class="jp-ai-tool-result">\n<summary>📋 <strong>${title}</strong></summary>\n\n\`\`\`\n${item.data.content}\n\`\`\`\n</details>\n\n`;
+                return `<details class="jp-ai-tool-result">\n<summary><strong>${title}</strong></summary>\n\n\`\`\`\n${item.data.content}\n\`\`\`\n</details>\n\n`;
               }
             case 'thinking':
               return chronologicalItems.length === 1
                 ? item.data.content // Show thinking directly if it's the only content
-                : `<details class="jp-ai-thinking" ${chronologicalItems.filter(i => i.type !== 'thinking').length === 0 ? 'open' : ''}>\n<summary>💭 <strong>Thinking</strong></summary>\n\n${item.data.content}\n</details>\n\n`;
+                : `<details class="jp-ai-thinking" ${chronologicalItems.filter(i => i.type !== 'thinking').length === 0 ? 'open' : ''}>\n<summary><strong>Thinking</strong></summary>\n\n${item.data.content}\n</details>\n\n`;
             default:
               return '';
           }

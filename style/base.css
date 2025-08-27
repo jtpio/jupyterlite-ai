@@ -58,15 +58,28 @@
   border-radius: var(--jp-border-radius);
   overflow: hidden;
   background: var(--jp-layout-color0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
   transition: all 0.2s ease;
+}
+
+/* Specific styling for different block types */
+.jp-ai-tool-call {
+  border-left: 3px solid var(--jp-warn-color1);
+}
+
+.jp-ai-tool-result {
+  border-left: 3px solid var(--jp-success-color1);
+}
+
+.jp-ai-thinking {
+  border-left: 3px solid var(--jp-info-color1);
 }
 
 .jp-ai-tool-call:hover,
 .jp-ai-tool-result:hover,
 .jp-ai-thinking:hover {
   border-color: var(--jp-brand-color2);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 15%);
 }
 
 .jp-ai-tool-call > summary,
@@ -83,6 +96,18 @@
   display: flex;
   align-items: center;
   transition: background-color 0.2s ease;
+}
+
+.jp-ai-tool-call > summary {
+  background: rgb(var(--jp-warn-color1-rgb) / 5%);
+}
+
+.jp-ai-tool-result > summary {
+  background: rgb(var(--jp-success-color1-rgb) / 5%);
+}
+
+.jp-ai-thinking > summary {
+  background: rgb(var(--jp-info-color1-rgb) / 5%);
 }
 
 .jp-ai-tool-call > summary:hover,
@@ -106,42 +131,22 @@
 .jp-ai-tool-call > summary::before,
 .jp-ai-tool-result > summary::before,
 .jp-ai-thinking > summary::before {
-  content: '▶';
-  margin-right: 6px;
-  font-size: 10px;
-  transition: transform 0.2s ease;
-  color: var(--jp-ui-font-color2);
+  content: '';
+  margin-right: 8px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid var(--jp-ui-font-color1);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-block;
+  margin-top: 2px;
 }
 
 .jp-ai-tool-call[open] > summary::before,
 .jp-ai-tool-result[open] > summary::before,
 .jp-ai-thinking[open] > summary::before {
   transform: rotate(90deg);
-}
-
-/* Specific styling for different block types */
-.jp-ai-tool-call {
-  border-left: 3px solid var(--jp-warn-color1);
-}
-
-.jp-ai-tool-result {
-  border-left: 3px solid var(--jp-success-color1);
-}
-
-.jp-ai-thinking {
-  border-left: 3px solid var(--jp-info-color1);
-}
-
-.jp-ai-tool-call > summary {
-  background: rgba(var(--jp-warn-color1-rgb), 0.05);
-}
-
-.jp-ai-tool-result > summary {
-  background: rgba(var(--jp-success-color1-rgb), 0.05);
-}
-
-.jp-ai-thinking > summary {
-  background: rgba(var(--jp-info-color1-rgb), 0.05);
 }
 
 /* Content inside the details */
@@ -165,11 +170,12 @@
 }
 
 /* Animation for opening/closing */
-@keyframes expandDetails {
+@keyframes expand-details {
   from {
     max-height: 0;
     opacity: 0;
   }
+
   to {
     max-height: 500px;
     opacity: 1;
@@ -179,5 +185,5 @@
 .jp-ai-tool-call[open],
 .jp-ai-tool-result[open],
 .jp-ai-thinking[open] {
-  animation: expandDetails 0.3s ease-out;
+  animation: expand-details 0.3s ease-out;
 }
