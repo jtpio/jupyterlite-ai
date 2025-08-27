@@ -268,11 +268,12 @@ export class ChatHandler extends AbstractChatModel {
     const currentMessageId = UUID.uuid4();
     let messageContent = '';
     const chronologicalItems: Array<{
-      type: 'tool_call' | 'tool_result' | 'thinking';
+      type: 'tool_call' | 'tool_result' | 'thinking' | 'progress';
       data: any;
       timestamp: number;
     }> = [];
     let isStreaming = false;
+    let progressMessageBuffer = '';
 
     const updateMessage = () => {
       // Sort items by timestamp to maintain chronological order
@@ -284,7 +285,7 @@ export class ChatHandler extends AbstractChatModel {
         .map(item => {
           switch (item.type) {
             case 'tool_call':
-              return `<details class="jp-ai-tool-call">\n<summary><strong>Using tool: ${item.data.name}</strong></summary>\n\n\`\`\`json\n${JSON.stringify(item.data.args, null, 2)}\n\`\`\`\n</details>\n\n`;
+              return `<details class="jp-ai-tool-call">\n<summary><strong>${item.data.name}</strong></summary>\n\n\`\`\`json\n${JSON.stringify(item.data.args, null, 2)}\n\`\`\`\n</details>\n\n`;
             case 'tool_result':
               try {
                 const contentData = JSON.parse(item.data.content);
@@ -299,6 +300,8 @@ export class ChatHandler extends AbstractChatModel {
               return chronologicalItems.length === 1
                 ? item.data.content // Show thinking directly if it's the only content
                 : `<details class="jp-ai-thinking" ${chronologicalItems.filter(i => i.type !== 'thinking').length === 0 ? 'open' : ''}>\n<summary><strong>Thinking</strong></summary>\n\n${item.data.content}\n</details>\n\n`;
+            case 'progress':
+              return `${item.data.content}\n\n`;
             default:
               return '';
           }
@@ -330,24 +333,7 @@ export class ChatHandler extends AbstractChatModel {
             this._history.push(message);
 
             if (message instanceof AIMessage) {
-              // Handle AI messages with tool calls
-              if (
-                (message as any).tool_calls &&
-                (message as any).tool_calls.length > 0
-              ) {
-                const newToolCalls = (message as any).tool_calls;
-                newToolCalls.forEach((toolCall: any) => {
-                  chronologicalItems.push({
-                    type: 'tool_call',
-                    data: toolCall,
-                    timestamp: Date.now()
-                  });
-                });
-                isStreaming = true;
-                updateMessage();
-              }
-
-              // Handle regular AI message content
+              // First handle any content (progress messages come BEFORE tool calls)
               if (message.content) {
                 const contents: string[] = [];
                 if (typeof message.content === 'string') {
@@ -361,13 +347,19 @@ export class ChatHandler extends AbstractChatModel {
                 }
                 contents.forEach(content => {
                   if (content.trim()) {
-                    if (
-                      chronologicalItems.some(
-                        item =>
-                          item.type === 'tool_call' ||
-                          item.type === 'tool_result'
-                      )
-                    ) {
+                    // Check if this looks like a thinking block (internal reasoning)
+                    const isThinkingContent =
+                      content.includes('Let me') ||
+                      content.includes('I need to') ||
+                      content.includes('First, I') ||
+                      (content.length > 200 && !content.includes('\n\n'));
+
+                    const hasToolActivity = chronologicalItems.some(
+                      item =>
+                        item.type === 'tool_call' || item.type === 'tool_result'
+                    );
+
+                    if (hasToolActivity && isThinkingContent) {
                       // This is thinking content, add it to chronological items
                       messageContent += content;
                       // Update or add thinking item
@@ -383,14 +375,51 @@ export class ChatHandler extends AbstractChatModel {
                           timestamp: Date.now()
                         });
                       }
+                    } else if (hasToolActivity) {
+                      // This is a progress message between tool calls
+                      progressMessageBuffer += content;
+
+                      // Add progress message when we have a complete sentence or paragraph
+                      if (
+                        content.includes('.') ||
+                        content.includes('\n\n') ||
+                        content.endsWith('!')
+                      ) {
+                        const progressContent = progressMessageBuffer.trim();
+                        if (progressContent) {
+                          chronologicalItems.push({
+                            type: 'progress',
+                            data: { content: progressContent },
+                            timestamp: Date.now()
+                          });
+                        }
+                        progressMessageBuffer = '';
+                      }
                     } else {
-                      // This is the final response
+                      // This is the final response (no tools used yet)
                       finalResponse += content;
                     }
                     isStreaming = true;
                     updateMessage();
                   }
                 });
+              }
+
+              // Then handle tool calls (AFTER content processing)
+              if (
+                (message as any).tool_calls &&
+                (message as any).tool_calls.length > 0
+              ) {
+                const newToolCalls = (message as any).tool_calls;
+                newToolCalls.forEach((toolCall: any) => {
+                  chronologicalItems.push({
+                    type: 'tool_call',
+                    data: toolCall,
+                    timestamp: Date.now()
+                  });
+                });
+                isStreaming = true;
+                updateMessage();
               }
             } else if (message instanceof ToolMessage) {
               // Handle tool response messages
@@ -426,6 +455,15 @@ export class ChatHandler extends AbstractChatModel {
             }
           });
         }
+      }
+
+      // Flush any remaining progress message buffer
+      if (progressMessageBuffer.trim()) {
+        chronologicalItems.push({
+          type: 'progress',
+          data: { content: progressMessageBuffer.trim() },
+          timestamp: Date.now()
+        });
       }
 
       // Final update to ensure everything is rendered
