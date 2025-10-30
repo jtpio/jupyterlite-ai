@@ -342,6 +342,34 @@ export class AIChatModel extends AbstractChatModel {
   }
 
   /**
+   * Extracts a human-readable summary from tool input for display in the header.
+   * @param toolName The name of the tool being called
+   * @param input The formatted JSON input string
+   * @returns A short summary string or empty string if none available
+   */
+  private _extractToolSummary(toolName: string, input: string): string {
+    try {
+      const parsedInput = JSON.parse(input);
+
+      switch (toolName) {
+        case 'execute_command':
+          if (parsedInput.commandId) {
+            return parsedInput.commandId;
+          }
+          break;
+        case 'discover_commands':
+          if (parsedInput.query) {
+            return `query: "${parsedInput.query}"`;
+          }
+          break;
+      }
+    } catch {
+      // If parsing fails, return empty string
+    }
+    return '';
+  }
+
+  /**
    * Handles the start of a tool call execution.
    * @param event Event containing the tool call start data
    */
