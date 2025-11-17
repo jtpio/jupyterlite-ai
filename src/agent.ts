@@ -1,6 +1,6 @@
 import { ISignal, Signal } from '@lumino/signaling';
 import { ToolLoopAgent } from 'ai';
-import type { CoreMessage } from 'ai';
+import type { ModelMessage } from 'ai';
 import { ISecretsManager } from 'jupyter-secrets-manager';
 
 import { BrowserMCPServerStreamableHttp } from './mcp/browser';
@@ -465,7 +465,7 @@ export class AgentManager {
   /**
    * Approves a pending tool call and resumes agent execution.
    *
-   * In AI SDK v6, when a tool without an execute function is called,
+   * When a tool without an execute function is called,
    * the agent loop stops. To approve and continue:
    * 1. Store the approval decision
    * 2. Emit an event to notify the system to continue execution
@@ -619,7 +619,7 @@ export class AgentManager {
         }
       }
 
-      // TODO: Integrate MCP servers with AI SDK v6's MCP client
+      // TODO: Integrate MCP servers with MCP client
       // For now, we'll just use the selected tools
       this._agent = new ToolLoopAgent({
         model: model,
@@ -639,7 +639,7 @@ export class AgentManager {
   };
 
   /**
-   * Processes the result stream from agent execution using AI SDK v6.
+   * Processes the result stream from agent execution.
    * Handles message streaming, tool calls, and emits appropriate events.
    * @param result The stream result from ToolLoopAgent.stream()
    */
@@ -708,7 +708,7 @@ export class AgentManager {
             }
           });
         } else if (chunk.type === 'tool-result') {
-          // Handle tool call completion - AI SDK v6 uses 'output' property
+          // Handle tool call completion
           const toolCallId = chunk.toolCallId;
           const toolName = chunk.toolName;
           const output = chunk.output;
@@ -729,7 +729,7 @@ export class AgentManager {
 
           activeToolCalls.delete(toolCallId);
         } else if (chunk.type === 'tool-error') {
-          // Handle tool errors - AI SDK v6 has separate error type
+          // Handle tool errors
           const toolCallId = chunk.toolCallId;
           const toolName = chunk.toolName;
           const error = chunk.error;
@@ -760,7 +760,7 @@ export class AgentManager {
             currentMessageId = null;
           }
 
-          // Update token usage - AI SDK v6 uses totalUsage
+          // Update token usage
           if (chunk.totalUsage) {
             this._tokenUsage.inputTokens += chunk.totalUsage.promptTokens || 0;
             this._tokenUsage.outputTokens +=
@@ -770,7 +770,7 @@ export class AgentManager {
 
           // Update history with assistant's response
           if (fullResponse || toolCalls.length > 0) {
-            const assistantMessage: CoreMessage = {
+            const assistantMessage: ModelMessage = {
               role: 'assistant',
               content: fullResponse || ''
             };
@@ -912,7 +912,7 @@ TOOL SELECTION GUIDELINES:
   private _secretsManager?: ISecretsManager;
   private _selectedToolNames: string[];
   private _agent: ToolLoopAgent | null;
-  private _history: CoreMessage[];
+  private _history: ModelMessage[];
   // MCP servers are initialized but not yet used - reserved for future MCP integration
   // @ts-expect-error - placeholder for future MCP server integration
   private _mcpServers: BrowserMCPServerStreamableHttp[] = [];

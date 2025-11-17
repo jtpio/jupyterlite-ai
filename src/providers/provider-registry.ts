@@ -54,7 +54,7 @@ export class ProviderRegistry implements IProviderRegistry {
       return null;
     }
 
-    // Directly return the language model - no wrapper needed with AI SDK v6
+    // Directly return the language model
     return provider.factory(options);
   }
 
