@@ -1,5 +1,5 @@
 import { CommandRegistry } from '@lumino/commands';
-import { tool } from '@openai/agents';
+import { tool } from 'ai';
 import { z } from 'zod';
 import { ITool } from '../tokens';
 import { AISettingsModel } from '../models/settings-model';
@@ -9,10 +9,9 @@ import { AISettingsModel } from '../models/settings-model';
  */
 export function createDiscoverCommandsTool(commands: CommandRegistry): ITool {
   return tool({
-    name: 'discover_commands',
     description:
       'Discover all available JupyterLab commands with their metadata, arguments, and descriptions',
-    parameters: z.object({
+    inputSchema: z.object({
       // currently unused, but could be used to filter commands by a search term
       query: z
         .string()
@@ -20,7 +19,7 @@ export function createDiscoverCommandsTool(commands: CommandRegistry): ITool {
         .nullable()
         .describe('Optional search query to filter commands')
     }),
-    execute: async (input: { query?: string | null }) => {
+    execute: async (input: { query?: string | null }, options) => {
       const { query } = input;
       const commandList: Array<{
         id: string;
@@ -82,26 +81,25 @@ export function createExecuteCommandTool(
   settingsModel: AISettingsModel
 ): ITool {
   return tool({
-    name: 'execute_command',
     description:
       'Execute a specific JupyterLab command with optional arguments',
-    parameters: z.object({
+    inputSchema: z.object({
       commandId: z.string().describe('The ID of the command to execute'),
       args: z
         .any()
         .optional()
         .describe('Optional arguments to pass to the command')
     }),
-    needsApproval: async (context, { commandId }) => {
+    needsApproval: async (input, options) => {
       // Use configurable list of commands requiring approval
       const commandsRequiringApproval =
         settingsModel.config.commandsRequiringApproval;
 
       return commandsRequiringApproval.some(
-        cmd => commandId.includes(cmd) || cmd.includes(commandId)
+        cmd => input.commandId.includes(cmd) || cmd.includes(input.commandId)
       );
     },
-    execute: async (input: { commandId: string; args?: any }) => {
+    execute: async (input: { commandId: string; args?: any }, options) => {
       const { commandId, args } = input;
 
       // Check if command exists
