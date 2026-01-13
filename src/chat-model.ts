@@ -76,7 +76,7 @@ interface IToolExecutionContext {
   /**
    * Human-readable summary extracted from tool input for display.
    */
-  summary: string;
+  summary?: string;
 }
 
 /**

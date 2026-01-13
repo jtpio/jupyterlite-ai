@@ -975,7 +975,7 @@ requires-dist = [
     { name = "jupyter-book", marker = "extra == 'docs'" },
     { name = "jupyter-secrets-manager", specifier = ">=0.4,<0.5" },
     { name = "jupyterlab", marker = "extra == 'jupyter'", specifier = ">=4.4.0" },
-    { name = "jupyterlab-ai-commands", specifier = ">=0.1.1,<0.2" },
+    { name = "jupyterlab-ai-commands", specifier = ">=0.1.3,<0.2" },
     { name = "jupyterlite", marker = "extra == 'jupyter'", specifier = ">=0.6.0a0" },
     { name = "notebook", marker = "extra == 'jupyter'", specifier = ">=7.4.0" },
     { name = "starlette", marker = "extra == 'test'", specifier = ">=0.48.0,<0.49" },
