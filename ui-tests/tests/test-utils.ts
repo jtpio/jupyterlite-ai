@@ -18,7 +18,10 @@ export const DEFAULT_GENERIC_PROVIDER_SETTINGS = {
         name: DEFAULT_MODEL_NAME,
         provider: 'generic',
         model: 'qwen2.5:0.5b',
-        baseURL: 'http://localhost:11434/v1'
+        baseURL: 'http://localhost:11434/v1',
+        parameters: {
+          temperature: 0
+        }
       }
     ],
     showTokenUsage: false,
