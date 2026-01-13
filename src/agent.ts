@@ -925,6 +925,15 @@ COMMAND DISCOVERY WORKFLOW:
 - For file and notebook operations, use query 'jupyterlab-ai-commands' to discover the curated set of AI commands (~17 commands for file/notebook/directory operations)
 - For other JupyterLab operations (terminal, launcher, UI), use specific keywords like 'terminal', 'launcher', etc.
 - IMPORTANT: Always use 'jupyterlab-ai-commands' as the query for file/notebook tasks - this returns a focused set of commands instead of 100+ generic JupyterLab commands
+
+KERNEL PREFERENCE FOR NOTEBOOKS AND CONSOLES:
+When creating notebooks or consoles for a specific programming language, use the 'kernelPreference' argument to specify the kernel:
+- To specify by language: { "kernelPreference": { "language": "python" } } or { "kernelPreference": { "language": "julia" } }
+- To specify by kernel name: { "kernelPreference": { "name": "python3" } } or { "kernelPreference": { "name": "julia-1.10" } }
+- Example: execute_command with commandId="notebook:create-new" and args={ "kernelPreference": { "language": "python" } }
+- Example: execute_command with commandId="console:create" and args={ "kernelPreference": { "name": "python3" } }
+- Common kernel names: "python3" (Python), "julia-1.10" (Julia), "ir" (R), "xpython" (xeus-python)
+- If unsure of exact kernel name, prefer using "language" which will match any kernel supporting that language
 `;
 
     return baseSystemPrompt + progressReportingPrompt;
