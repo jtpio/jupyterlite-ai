@@ -919,24 +919,12 @@ Guidelines:
 PRIMARY TOOL USAGE - COMMAND-BASED OPERATIONS:
 Most operations in JupyterLab should be performed using the command system:
 1. Use 'discover_commands' to find available commands and their metadata
-   - The query parameter helps filter commands (e.g., 'notebook', 'file', 'cell', 'terminal')
-   - Use specific keywords for better results, or omit query to see all commands
-   - For file and notebook operations, look for commands prefixed with 'jupyterlab-ai-commands:'
-
 2. Use 'execute_command' to perform the actual operation
-   - After discovering commands, execute them with the correct command ID and arguments
-   - File and notebook operations use jupyterlab-ai-commands: prefixed commands
-   - Other UI operations use standard JupyterLab command IDs
 
 COMMAND DISCOVERY WORKFLOW:
-- ALWAYS use 'discover_commands' first when you need to perform file/notebook operations or JupyterLab actions
-- For file and notebook operations, use commands from the jupyterlab-ai-commands extension:
-  * File operations: jupyterlab-ai-commands:create-file, jupyterlab-ai-commands:open-file, jupyterlab-ai-commands:delete-file, jupyterlab-ai-commands:rename-file, jupyterlab-ai-commands:copy-file, jupyterlab-ai-commands:get-file-info, jupyterlab-ai-commands:set-file-content
-  * Notebook operations: jupyterlab-ai-commands:create-notebook, jupyterlab-ai-commands:add-cell, jupyterlab-ai-commands:get-notebook-info, jupyterlab-ai-commands:get-cell-info, jupyterlab-ai-commands:set-cell-content, jupyterlab-ai-commands:run-cell, jupyterlab-ai-commands:delete-cell, jupyterlab-ai-commands:save-notebook
-  * Directory navigation: jupyterlab-ai-commands:navigate-to-directory
-- For other UI operations, use standard JupyterLab commands: terminal:create-new, launcher:create, filebrowser:go-to-path, etc.
-- The query parameter should typically be a single relevant word to find appropriate commands
-- If the first query doesn't find what you need, try alternative keywords or search all commands
+- For file and notebook operations, use query 'jupyterlab-ai-commands' to discover the curated set of AI commands (~17 commands for file/notebook/directory operations)
+- For other JupyterLab operations (terminal, launcher, UI), use specific keywords like 'terminal', 'launcher', etc.
+- IMPORTANT: Always use 'jupyterlab-ai-commands' as the query for file/notebook tasks - this returns a focused set of commands instead of 100+ generic JupyterLab commands
 `;
 
     return baseSystemPrompt + progressReportingPrompt;
