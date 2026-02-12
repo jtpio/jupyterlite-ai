@@ -401,6 +401,11 @@ export class AIChatModel extends AbstractChatModel {
             return parsedInput.name;
           }
           break;
+        case 'browser_fetch':
+          if (parsedInput.url) {
+            return parsedInput.url;
+          }
+          break;
       }
     } catch {
       // If parsing fails, return empty string
