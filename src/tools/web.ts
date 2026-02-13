@@ -7,6 +7,95 @@ const MAX_ALLOWED_CONTENT_CHARS = 100000;
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_TIMEOUT_MS = 120000;
 
+interface IReadBodyResult {
+  content: string;
+  isTruncated: boolean;
+  totalChars: number;
+  totalCharsExact: boolean;
+}
+
+/**
+ * Read response body text with a character cap.
+ *
+ * Stops early once the cap is reached to avoid buffering arbitrarily large
+ * payloads in memory.
+ */
+async function readResponseText(
+  response: Response,
+  maxContentChars: number
+): Promise<IReadBodyResult> {
+  if (!response.body) {
+    const body = await response.text();
+    return {
+      content: body.slice(0, maxContentChars),
+      isTruncated: body.length > maxContentChars,
+      totalChars: body.length,
+      totalCharsExact: true
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let content = '';
+  let totalChars = 0;
+  let isTruncated = false;
+  let done = false;
+
+  while (!done) {
+    const readResult = await reader.read();
+    done = readResult.done;
+    if (done) {
+      continue;
+    }
+
+    const chunk = decoder.decode(readResult.value, { stream: true });
+    if (!chunk) {
+      continue;
+    }
+
+    totalChars += chunk.length;
+
+    if (!isTruncated) {
+      const remaining = maxContentChars - content.length;
+      if (chunk.length <= remaining) {
+        content += chunk;
+      } else {
+        content += chunk.slice(0, remaining);
+        isTruncated = true;
+      }
+    }
+
+    if (isTruncated) {
+      await reader.cancel();
+      return {
+        content,
+        isTruncated: true,
+        totalChars,
+        totalCharsExact: false
+      };
+    }
+  }
+
+  const tail = decoder.decode();
+  if (tail) {
+    totalChars += tail.length;
+    const remaining = maxContentChars - content.length;
+    if (tail.length <= remaining) {
+      content += tail;
+    } else {
+      content += tail.slice(0, remaining);
+      isTruncated = true;
+    }
+  }
+
+  return {
+    content,
+    isTruncated,
+    totalChars,
+    totalCharsExact: true
+  };
+}
+
 /**
  * Create a browser-native URL fetch tool.
  *
@@ -90,9 +179,7 @@ export function createBrowserFetchTool(): ITool {
 
         const contentType = response.headers.get('content-type') || '';
         const contentLength = response.headers.get('content-length');
-        const body = await response.text();
-        const truncated = body.length > maxContentChars;
-        const content = truncated ? body.slice(0, maxContentChars) : body;
+        const body = await readResponseText(response, maxContentChars);
         const success = response.ok;
 
         return {
@@ -110,10 +197,11 @@ export function createBrowserFetchTool(): ITool {
                 errorType: 'http_error',
                 error: `HTTP ${response.status} ${response.statusText}`
               }),
-          isTruncated: truncated,
-          returnedChars: content.length,
-          totalChars: body.length,
-          content,
+          isTruncated: body.isTruncated,
+          returnedChars: body.content.length,
+          totalChars: body.totalChars,
+          totalCharsExact: body.totalCharsExact,
+          content: body.content,
           limitations:
             'Browser fetch is subject to CORS, site bot protections, and browser network policy.'
         };
@@ -130,7 +218,10 @@ export function createBrowserFetchTool(): ITool {
         return {
           success: false,
           errorType: 'network_or_cors',
-          error: (error as Error).message || 'Fetch failed',
+          error:
+            error instanceof Error && error.message
+              ? error.message
+              : 'Fetch failed',
           url: parsedUrl.toString(),
           likelyCauses: [
             'CORS blocked by the target website',

@@ -29,9 +29,10 @@ Provider tools run on provider infrastructure and are usually less affected by b
 
 When web tools are available, the agent follows this policy:
 
-1. For a specific URL request, try `browser_fetch` first.
-2. If `browser_fetch` fails (CORS/network/access), try provider `web_fetch` (if available).
-3. If `web_fetch` also fails, fall back to `web_search` / `google_search` (if available).
+1. For a specific URL request, prefer `browser_fetch` first.
+2. If the first fetch method fails due to access/policy/network issues, try the other fetch method (`browser_fetch` <-> `web_fetch`) when available.
+3. If `web_fetch` fails with provider-side policy errors such as `url_not_allowed` or `url_not_accessible`, retry with `browser_fetch` before search when possible.
+4. Fall back to `web_search` / `google_search` only after both fetch methods fail or are unavailable.
 
 This behavior is encoded in the agent prompt policy and is intended to keep URL inspection deterministic while still giving a useful fallback path.
 
@@ -131,6 +132,8 @@ Common causes:
 - Provider-side URL policy rejects that endpoint.
 
 If `allowedDomains` is empty/unset, provider-side policy can still reject some URLs.
+
+When `browser_fetch` is available, the agent must retry the same URL with `browser_fetch` before switching to search.
 
 ### Why `web_search` may answer without `web_fetch`
 

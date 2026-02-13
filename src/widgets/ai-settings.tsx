@@ -677,9 +677,17 @@ const AISettingsComponent: React.FC<IAISettingsComponentProps> = ({
                           ? isActive
                           : config.activeCompleterProvider === provider.id;
                       const params = provider.parameters;
+                      const supportsWebSearch =
+                        provider.provider === 'openai' ||
+                        provider.provider === 'anthropic' ||
+                        provider.provider === 'google';
+                      const supportsWebFetch =
+                        provider.provider === 'anthropic';
                       const webSearchEnabled =
+                        supportsWebSearch &&
                         provider.customSettings?.webSearch?.enabled === true;
                       const webFetchEnabled =
+                        supportsWebFetch &&
                         provider.customSettings?.webFetch?.enabled === true;
 
                       return (

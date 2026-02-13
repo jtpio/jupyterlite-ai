@@ -58,6 +58,28 @@ function formatCommaSeparatedList(value: unknown): string {
   return value.filter(item => typeof item === 'string').join(', ');
 }
 
+function sanitizeCustomSettingsForProvider(
+  provider: string,
+  customSettings: Record<string, any>
+): Record<string, any> {
+  const result: Record<string, any> = {};
+  const webSearch = toRecord(customSettings.webSearch);
+  const webFetch = toRecord(customSettings.webFetch);
+  const supportsWebSearch =
+    provider === 'openai' || provider === 'anthropic' || provider === 'google';
+  const supportsWebFetch = provider === 'anthropic';
+
+  if (supportsWebSearch && webSearch.enabled === true) {
+    result.webSearch = webSearch;
+  }
+
+  if (supportsWebFetch && webFetch.enabled === true) {
+    result.webFetch = webFetch;
+  }
+
+  return result;
+}
+
 interface IProviderConfigDialogProps {
   open: boolean;
   onClose: () => void;
@@ -204,6 +226,10 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
     const hasParameters = Object.keys(parameters).some(
       key => parameters[key as keyof IProviderParameters] !== undefined
     );
+    const sanitizedCustomSettings = sanitizeCustomSettingsForProvider(
+      provider,
+      customSettings
+    );
 
     const config: Omit<IProviderConfig, 'id'> = {
       name: name.trim(),
@@ -212,7 +238,9 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
       ...(apiKey && { apiKey }),
       ...(baseURL && { baseURL }),
       ...(hasParameters && { parameters }),
-      ...(Object.keys(customSettings).length > 0 && { customSettings })
+      ...(Object.keys(sanitizedCustomSettings).length > 0 && {
+        customSettings: sanitizedCustomSettings
+      })
     };
 
     onSave(config);

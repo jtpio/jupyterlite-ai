@@ -95,7 +95,8 @@
                     "description": "Anthropic: blocked domains for web search."
                   },
                   "maxUses": {
-                    "type": "number",
+                    "type": "integer",
+                    "minimum": 1,
                     "description": "Anthropic: maximum number of web searches."
                   },
                   "mode": {
@@ -105,13 +106,18 @@
                   },
                   "dynamicThreshold": {
                     "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
                     "description": "Google: dynamic retrieval threshold."
                   },
                   "userLocation": {
                     "type": "object",
                     "description": "Approximate location metadata for geographically relevant web results.",
                     "properties": {
-                      "country": { "type": "string" },
+                      "country": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z]{2}$"
+                      },
                       "region": { "type": "string" },
                       "city": { "type": "string" },
                       "timezone": { "type": "string" }
@@ -130,7 +136,8 @@
                     "description": "Enable Anthropic provider-hosted web fetch."
                   },
                   "maxUses": {
-                    "type": "number",
+                    "type": "integer",
+                    "minimum": 1,
                     "description": "Maximum number of web fetches."
                   },
                   "allowedDomains": {
@@ -144,7 +151,8 @@
                     "description": "Blocked domains for web fetch."
                   },
                   "maxContentTokens": {
-                    "type": "number",
+                    "type": "integer",
+                    "minimum": 1,
                     "description": "Maximum fetched content tokens."
                   },
                   "citationsEnabled": {

@@ -317,7 +317,6 @@ interface IAgentConfig {
  * Runtime tool metadata used for prompting and capability checks.
  */
 interface IRuntimeToolInfo {
-  names: Set<string>;
   hasBrowserFetch: boolean;
   hasWebFetch: boolean;
   hasWebSearch: boolean;
@@ -711,17 +710,16 @@ export class AgentManager {
 
     const model = await this._createModel();
 
-    const shouldUseTools = !!(
-      config.toolsEnabled &&
-      this._selectedToolNames.length > 0 &&
-      this._toolRegistry &&
-      Object.keys(this._toolRegistry.tools).length > 0 &&
-      this._supportsToolCalling()
+    const supportsToolCalling = this._supportsToolCalling();
+    const canUseTools = config.toolsEnabled && supportsToolCalling;
+    const hasFunctionToolRegistry = !!(
+      this._toolRegistry && Object.keys(this._toolRegistry.tools).length > 0
     );
-
-    const functionTools = shouldUseTools
-      ? { ...this.selectedAgentTools, ...this._mcpTools }
-      : this._mcpTools;
+    const selectedFunctionTools =
+      canUseTools && hasFunctionToolRegistry ? this.selectedAgentTools : {};
+    const functionTools = canUseTools
+      ? { ...selectedFunctionTools, ...this._mcpTools }
+      : {};
 
     const activeProviderConfig = this._settingsModel.getProvider(
       this._activeProvider
@@ -736,8 +734,11 @@ export class AgentManager {
     const { tools, runtimeToolInfo } = this._buildRuntimeTools({
       provider: activeProviderConfig?.provider ?? '',
       customSettings: activeProviderConfig?.customSettings,
-      functionTools
+      functionTools,
+      includeProviderTools: canUseTools
     });
+
+    const shouldUseTools = canUseTools && Object.keys(tools).length > 0;
 
     this._agentConfig = {
       model,
@@ -759,12 +760,15 @@ export class AgentManager {
     provider: string;
     customSettings?: unknown;
     functionTools: ToolMap;
+    includeProviderTools: boolean;
   }): { tools: ToolMap; runtimeToolInfo: IRuntimeToolInfo } {
-    const providerTools = createProviderTools({
-      provider: options.provider,
-      customSettings: options.customSettings,
-      hasFunctionTools: Object.keys(options.functionTools).length > 0
-    });
+    const providerTools = options.includeProviderTools
+      ? createProviderTools({
+          provider: options.provider,
+          customSettings: options.customSettings,
+          hasFunctionTools: Object.keys(options.functionTools).length > 0
+        })
+      : {};
 
     const tools = {
       ...providerTools,
@@ -776,7 +780,6 @@ export class AgentManager {
     return {
       tools,
       runtimeToolInfo: {
-        names,
         hasBrowserFetch: names.has('browser_fetch'),
         hasWebFetch: names.has('web_fetch'),
         hasWebSearch: names.has('web_search') || names.has('google_search')
@@ -1141,7 +1144,9 @@ ${lines.join('\n')}
 WEB RETRIEVAL POLICY:
 - If the user asks about a specific URL and browser_fetch is available, call browser_fetch first for that URL.
 - If browser_fetch fails due to CORS/network/access, try web_fetch (if available) for that same URL.
-- If web_fetch also fails (for example: url_not_accessible or url_not_allowed), briefly state the failure and then fall back to web_search/google_search if available.
+- If web_fetch fails with access/policy errors (for example: url_not_accessible or url_not_allowed) and browser_fetch is available, you MUST call browser_fetch for that same URL before searching.
+- If either fetch method fails with temporary access/network issues (for example: network_or_cors), try the other fetch method if available before searching.
+- Only fall back to web_search/google_search after both fetch methods fail or are unavailable.
 - If the user explicitly asks to inspect one exact URL, do not skip directly to search unless both fetch methods fail or are unavailable.
 - In your final response, state which retrieval method succeeded (browser_fetch, web_fetch, or web_search/google_search) and mention relevant limitations.
 `;

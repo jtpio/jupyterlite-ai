@@ -19,6 +19,11 @@ type IUserLocation = {
   timezone?: string;
 };
 
+interface IRangeOptions {
+  min?: number;
+  max?: number;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -30,23 +35,69 @@ function asBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
 function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value : undefined;
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
-function asStringArray(value: unknown): string[] | undefined {
+function asInteger(
+  value: unknown,
+  range: IRangeOptions = {}
+): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return undefined;
+  }
+  if (range.min !== undefined && value < range.min) {
+    return undefined;
+  }
+  if (range.max !== undefined && value > range.max) {
+    return undefined;
+  }
+  return value;
+}
+
+function asUnitInterval(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value < 0 || value > 1) {
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeDomain(value: string): string | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const withoutProtocol = normalized.replace(/^https?:\/\//, '');
+  const hostname = withoutProtocol.split('/')[0].trim();
+  if (!hostname) {
+    return undefined;
+  }
+
+  return hostname.startsWith('*.') ? hostname.slice(2) : hostname;
+}
+
+function asDomainArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
-  const values = value.filter(
-    v => typeof v === 'string' && v.trim()
-  ) as string[];
+
+  const values = Array.from(
+    new Set(
+      value
+        .filter((v): v is string => typeof v === 'string')
+        .map(normalizeDomain)
+        .filter((domain): domain is string => !!domain)
+    )
+  );
+
   return values.length > 0 ? values : undefined;
 }
 
@@ -68,13 +119,21 @@ function asGoogleSearchMode(
   return undefined;
 }
 
+function asCountryCode(value: unknown): string | undefined {
+  const country = asString(value)?.toUpperCase();
+  if (!country || !/^[A-Z]{2}$/.test(country)) {
+    return undefined;
+  }
+  return country;
+}
+
 function asUserLocation(value: unknown): IUserLocation | undefined {
   const location = asRecord(value);
   if (!location) {
     return undefined;
   }
 
-  const country = asString(location.country);
+  const country = asCountryCode(location.country);
   const city = asString(location.city);
   const region = asString(location.region);
   const timezone = asString(location.timezone);
@@ -100,7 +159,7 @@ function createOpenAIWebSearchTool(
     webSearchSettings.searchContextSize
   );
   const userLocation = asUserLocation(webSearchSettings.userLocation);
-  const allowedDomains = asStringArray(webSearchSettings.allowedDomains);
+  const allowedDomains = asDomainArray(webSearchSettings.allowedDomains);
 
   return openai.tools.webSearch({
     ...(externalWebAccess !== undefined && { externalWebAccess }),
@@ -117,9 +176,9 @@ function createOpenAIWebSearchTool(
 function createAnthropicWebSearchTool(
   webSearchSettings: Record<string, unknown>
 ): Tool {
-  const maxUses = asNumber(webSearchSettings.maxUses);
-  const allowedDomains = asStringArray(webSearchSettings.allowedDomains);
-  const blockedDomains = asStringArray(webSearchSettings.blockedDomains);
+  const maxUses = asInteger(webSearchSettings.maxUses, { min: 1 });
+  const allowedDomains = asDomainArray(webSearchSettings.allowedDomains);
+  const blockedDomains = asDomainArray(webSearchSettings.blockedDomains);
   const userLocation = asUserLocation(webSearchSettings.userLocation);
 
   return anthropic.tools.webSearch_20250305({
@@ -133,13 +192,16 @@ function createAnthropicWebSearchTool(
 function createAnthropicWebFetchTool(
   webFetchSettings: Record<string, unknown>
 ): Tool {
-  const maxUses = asNumber(webFetchSettings.maxUses);
-  const allowedDomains = asStringArray(webFetchSettings.allowedDomains);
-  const blockedDomains = asStringArray(webFetchSettings.blockedDomains);
-  const maxContentTokens = asNumber(webFetchSettings.maxContentTokens);
-  const citationsEnabled = asBoolean(webFetchSettings.citationsEnabled);
+  const maxUses = asInteger(webFetchSettings.maxUses, { min: 1 });
+  const allowedDomains = asDomainArray(webFetchSettings.allowedDomains);
+  const blockedDomains = asDomainArray(webFetchSettings.blockedDomains);
+  const maxContentTokens = asInteger(webFetchSettings.maxContentTokens, {
+    min: 1
+  });
   const citations = asRecord(webFetchSettings.citations);
-  const citationsFromObject = asBoolean(citations?.enabled);
+  const citationsEnabled =
+    asBoolean(webFetchSettings.citationsEnabled) ??
+    asBoolean(citations?.enabled);
 
   return anthropic.tools.webFetch_20250910({
     ...(maxUses !== undefined && { maxUses }),
@@ -148,9 +210,6 @@ function createAnthropicWebFetchTool(
     ...(maxContentTokens !== undefined && { maxContentTokens }),
     ...(citationsEnabled !== undefined && {
       citations: { enabled: citationsEnabled }
-    }),
-    ...(citationsFromObject !== undefined && {
-      citations: { enabled: citationsFromObject }
     })
   });
 }
@@ -159,7 +218,7 @@ function createGoogleWebSearchTool(
   webSearchSettings: Record<string, unknown>
 ): Tool {
   const mode = asGoogleSearchMode(webSearchSettings.mode);
-  const dynamicThreshold = asNumber(webSearchSettings.dynamicThreshold);
+  const dynamicThreshold = asUnitInterval(webSearchSettings.dynamicThreshold);
 
   return google.tools.googleSearch({
     ...(mode && { mode }),
@@ -199,18 +258,12 @@ export function createProviderTools(options: IProviderToolContext): ToolMap {
     }
 
     case 'google': {
-      if (webSearchEnabled && webSearchSettings) {
+      if (webSearchEnabled && webSearchSettings && !options.hasFunctionTools) {
         // Google provider-defined tools currently conflict with function tools
         // in some AI SDK + Gemini combinations (custom tools can be ignored).
         // Keep this guard until upstream behavior is resolved:
         // https://github.com/vercel/ai/issues/8258
-        if (options.hasFunctionTools) {
-          console.warn(
-            'Skipping google_search provider tool because it cannot be mixed with function tools.'
-          );
-        } else {
-          tools.google_search = createGoogleWebSearchTool(webSearchSettings);
-        }
+        tools.google_search = createGoogleWebSearchTool(webSearchSettings);
       }
       break;
     }

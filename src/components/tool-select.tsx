@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { INamedTool, IToolRegistry } from '../tokens';
 import { AIChatModel } from '../chat-model';
 import { AISettingsModel } from '../models/settings-model';
+import { createProviderTools } from '../providers/provider-tools';
 
 const SELECT_ITEM_CLASS = 'jp-AIToolSelect-item';
 
@@ -116,7 +117,7 @@ export function ToolSelect(props: IToolSelectProps): JSX.Element {
 
   // Track provider-level tools (e.g. web_search/web_fetch).
   useEffect(() => {
-    if (!agentManager) {
+    if (!agentManager || !toolsEnabled) {
       setProviderToolNames([]);
       return;
     }
@@ -129,24 +130,12 @@ export function ToolSelect(props: IToolSelectProps): JSX.Element {
         return;
       }
 
-      const customSettings = providerConfig.customSettings || {};
-      const webSearchEnabled = customSettings.webSearch?.enabled === true;
-      const webFetchEnabled = customSettings.webFetch?.enabled === true;
-      const providerTools: string[] = [];
-
-      if (webSearchEnabled) {
-        if (providerConfig.provider === 'google') {
-          providerTools.push('google_search');
-        } else {
-          providerTools.push('web_search');
-        }
-      }
-
-      if (providerConfig.provider === 'anthropic' && webFetchEnabled) {
-        providerTools.push('web_fetch');
-      }
-
-      setProviderToolNames(Array.from(new Set(providerTools)));
+      const providerTools = createProviderTools({
+        provider: providerConfig.provider,
+        customSettings: providerConfig.customSettings,
+        hasFunctionTools: selectedToolNames.length > 0
+      });
+      setProviderToolNames(Object.keys(providerTools));
     };
 
     updateProviderTools();
@@ -157,7 +146,7 @@ export function ToolSelect(props: IToolSelectProps): JSX.Element {
       settingsModel.stateChanged.disconnect(updateProviderTools);
       agentManager.activeProviderChanged.disconnect(updateProviderTools);
     };
-  }, [settingsModel, agentManager]);
+  }, [settingsModel, agentManager, selectedToolNames.length, toolsEnabled]);
 
   // Initialize selected tools to all tools by default
   useEffect(() => {
@@ -269,17 +258,12 @@ export function ToolSelect(props: IToolSelectProps): JSX.Element {
         )}
 
         {providerToolNames.map(toolName => {
-          const isGoogleSearch = toolName === 'google_search';
-          const hasFunctionToolsSelected = selectedToolNames.length > 0;
-          const googleWarning =
-            isGoogleSearch && hasFunctionToolsSelected
-              ? trans.__(
-                  'May be skipped when function tools are enabled for Google.'
-                )
-              : trans.__('Enabled via provider settings.');
-
           return (
-            <Tooltip key={toolName} title={googleWarning} placement="left">
+            <Tooltip
+              key={toolName}
+              title={trans.__('Enabled via provider settings.')}
+              placement="left"
+            >
               <MenuItem className={SELECT_ITEM_CLASS} disabled>
                 <CheckIcon
                   sx={{
