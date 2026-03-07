@@ -79,6 +79,50 @@ test.describe('#commandsTool', () => {
     expect(count).toBeGreaterThan(0);
   });
 
+  test('should support multi-word query filtering', async ({ page }) => {
+    test.setTimeout(120 * 1000);
+
+    const panel = await openChatPanel(page);
+    const input = panel
+      .locator('.jp-chat-input-container')
+      .getByRole('combobox');
+    const sendButton = panel.locator(
+      '.jp-chat-input-container .jp-chat-send-button'
+    );
+
+    const PROMPT =
+      'Use the discover_commands tool with query parameter set to "run notebook" to find commands related to running notebooks';
+
+    await input.pressSequentially(PROMPT);
+    await sendButton.click();
+
+    await expect(
+      panel.locator('.jp-chat-message-header:has-text("Jupyternaut")')
+    ).toHaveCount(1, { timeout: EXPECT_TIMEOUT });
+
+    const toolCall = panel.locator('.jp-ai-tool-call');
+    await expect(toolCall).toHaveCount(1, { timeout: EXPECT_TIMEOUT });
+
+    await expect(toolCall).toContainText('discover_commands', {
+      timeout: EXPECT_TIMEOUT
+    });
+    await expect(toolCall).toContainText('query: "run notebook"', {
+      timeout: EXPECT_TIMEOUT
+    });
+
+    await toolCall.click();
+
+    const toolResultText = await toolCall.textContent();
+
+    const countMatch = toolResultText?.match(/"commandCount":\s*(\d+)/);
+    expect(countMatch).toBeTruthy();
+    const count = parseInt(countMatch![1], 10);
+
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThan(100);
+    expect(toolResultText).toContain('notebook:run');
+  });
+
   test('should return all commands without query parameter', async ({
     page
   }) => {
