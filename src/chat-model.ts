@@ -29,13 +29,9 @@ import { UUID } from '@lumino/coreutils';
 
 import { ISignal, Signal } from '@lumino/signaling';
 
-import { AgentManager, IAgentEvent } from './agent';
-
 import { AI_AVATAR } from './icons';
 
-import { AISettingsModel } from './models/settings-model';
-
-import { ITokenUsage } from './tokens';
+import type { IAgentManager, IAISettingsModel, ITokenUsage } from './tokens';
 
 /**
  * Tool call status types.
@@ -145,14 +141,14 @@ export class AIChatModel extends AbstractChatModel {
   /**
    * A signal emitting when the token usage changed.
    */
-  get tokenUsageChanged(): ISignal<AgentManager, ITokenUsage> {
+  get tokenUsageChanged(): ISignal<IAgentManager, ITokenUsage> {
     return this._agentManager.tokenUsageChanged;
   }
 
   /**
    * Get the agent manager associated to the model.
    */
-  get agentManager(): AgentManager {
+  get agentManager(): IAgentManager {
     return this._agentManager;
   }
 
@@ -299,7 +295,10 @@ export class AIChatModel extends AbstractChatModel {
    * Handles events emitted by the agent manager.
    * @param event The event data containing type and payload
    */
-  private _onAgentEvent(_sender: AgentManager, event: IAgentEvent): void {
+  private _onAgentEvent(
+    _sender: IAgentManager,
+    event: IAgentManager.IAgentEvent
+  ): void {
     switch (event.type) {
       case 'message_start':
         this._handleMessageStart(event);
@@ -332,7 +331,9 @@ export class AIChatModel extends AbstractChatModel {
    * Handles the start of a new message from the AI agent.
    * @param event Event containing the message start data
    */
-  private _handleMessageStart(event: IAgentEvent<'message_start'>): void {
+  private _handleMessageStart(
+    event: IAgentManager.IAgentEvent<'message_start'>
+  ): void {
     const aiMessage: IMessageContent = {
       body: '',
       sender: this._getAIUser(),
@@ -350,7 +351,9 @@ export class AIChatModel extends AbstractChatModel {
    * Handles streaming message chunks from the AI agent.
    * @param event Event containing the message chunk data
    */
-  private _handleMessageChunk(event: IAgentEvent<'message_chunk'>): void {
+  private _handleMessageChunk(
+    event: IAgentManager.IAgentEvent<'message_chunk'>
+  ): void {
     if (
       this._currentStreamingMessage &&
       this._currentStreamingMessage.id === event.data.messageId
@@ -363,7 +366,9 @@ export class AIChatModel extends AbstractChatModel {
    * Handles the completion of a message from the AI agent.
    * @param event Event containing the message completion data
    */
-  private _handleMessageComplete(event: IAgentEvent<'message_complete'>): void {
+  private _handleMessageComplete(
+    event: IAgentManager.IAgentEvent<'message_complete'>
+  ): void {
     if (
       this._currentStreamingMessage &&
       this._currentStreamingMessage.id === event.data.messageId
@@ -458,7 +463,7 @@ export class AIChatModel extends AbstractChatModel {
    * @param event Event containing the tool call start data
    */
   private _handleToolCallStartEvent(
-    event: IAgentEvent<'tool_call_start'>
+    event: IAgentManager.IAgentEvent<'tool_call_start'>
   ): void {
     const messageId = UUID.uuid4();
     const summary = this._extractToolSummary(
@@ -504,7 +509,7 @@ export class AIChatModel extends AbstractChatModel {
    * Handles the completion of a tool call execution.
    */
   private _handleToolCallCompleteEvent(
-    event: IAgentEvent<'tool_call_complete'>
+    event: IAgentManager.IAgentEvent<'tool_call_complete'>
   ): void {
     const context = this._toolContexts.get(event.data.callId);
     const status = event.data.isError ? 'error' : 'completed';
@@ -556,7 +561,7 @@ export class AIChatModel extends AbstractChatModel {
   /**
    * Handles error events from the AI agent.
    */
-  private _handleErrorEvent(event: IAgentEvent<'error'>): void {
+  private _handleErrorEvent(event: IAgentManager.IAgentEvent<'error'>): void {
     this.messageAdded({
       body: `Error generating response: ${event.data.error.message}`,
       sender: this._getAIUser(),
@@ -571,7 +576,7 @@ export class AIChatModel extends AbstractChatModel {
    * Handles tool approval request events from the AI agent.
    */
   private _handleToolApprovalRequest(
-    event: IAgentEvent<'tool_approval_request'>
+    event: IAgentManager.IAgentEvent<'tool_approval_request'>
   ): void {
     const context = this._toolContexts.get(event.data.toolCallId);
     if (!context) {
@@ -586,7 +591,7 @@ export class AIChatModel extends AbstractChatModel {
    * Handles tool approval resolved events from the AI agent.
    */
   private _handleToolApprovalResolved(
-    event: IAgentEvent<'tool_approval_resolved'>
+    event: IAgentManager.IAgentEvent<'tool_approval_resolved'>
   ): void {
     const context = Array.from(this._toolContexts.values()).find(
       ctx => ctx.approvalId === event.data.approvalId
@@ -916,10 +921,10 @@ export class AIChatModel extends AbstractChatModel {
   }
 
   // Private fields
-  private _settingsModel: AISettingsModel;
+  private _settingsModel: IAISettingsModel;
   private _user: IUser;
   private _toolContexts: Map<string, IToolExecutionContext> = new Map();
-  private _agentManager: AgentManager;
+  private _agentManager: IAgentManager;
   private _currentStreamingMessage: IMessage | null = null;
   private _nameChanged = new Signal<AIChatModel, string>(this);
   private _trans: TranslationBundle;
@@ -1201,11 +1206,11 @@ export namespace AIChatModel {
     /**
      * Settings model for AI configuration
      */
-    settingsModel: AISettingsModel;
+    settingsModel: IAISettingsModel;
     /**
      * Optional agent manager for handling AI agent lifecycle
      */
-    agentManager: AgentManager;
+    agentManager: IAgentManager;
     /**
      * Optional active cell manager for Jupyter integration
      */
@@ -1239,6 +1244,6 @@ export namespace AIChatModel {
     /**
      * The agent manager of the chat.
      */
-    agentManager: AgentManager;
+    agentManager: IAgentManager;
   }
 }
