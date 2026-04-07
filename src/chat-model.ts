@@ -488,7 +488,8 @@ export class AIChatModel extends AbstractChatModel {
     this._toolContexts.set(event.data.callId, context);
 
     const toolCallMessage: IMessageContent = {
-      body: Private.buildToolCallHtml({
+      body: '',
+      mime_model: Private.buildToolCallHtml({
         toolName: context.toolName,
         input: context.input,
         status: context.status,
@@ -532,7 +533,8 @@ export class AIChatModel extends AbstractChatModel {
       );
       for (const bundle of mimeBundles) {
         this.messageAdded({
-          body: bundle,
+          body: '',
+          mime_model: bundle,
           sender: this._getAIUser(),
           id: UUID.uuid4(),
           time: Date.now() / 1000,
@@ -630,7 +632,7 @@ export class AIChatModel extends AbstractChatModel {
 
     context.status = status;
     existingMessage.update({
-      body: Private.buildToolCallHtml({
+      mime_model: Private.buildToolCallHtml({
         toolName: context.toolName,
         input: context.input,
         status: context.status,
@@ -927,7 +929,6 @@ export class AIChatModel extends AbstractChatModel {
   private _agentManager: IAgentManager;
   private _currentStreamingMessage: IMessage | null = null;
   private _nameChanged = new Signal<AIChatModel, string>(this);
-  private _trans: TranslationBundle;
 }
 
 namespace Private {
