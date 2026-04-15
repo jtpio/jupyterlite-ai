@@ -13,7 +13,9 @@ import {
   type TypedToolError,
   type TypedToolOutputDenied,
   type TypedToolResult,
-  type AssistantModelMessage
+  type UserContent,
+  type AssistantModelMessage,
+  APICallError
 } from 'ai';
 import { ISecretsManager } from 'jupyter-secrets-manager';
 
@@ -571,10 +573,17 @@ export class AgentManager implements IAgentManager {
    * Handles the complete execution cycle including tool calls.
    * @param message The user message to respond to (may include processed attachment content)
    */
-  async generateResponse(message: string): Promise<void> {
+  async generateResponse(message: UserContent): Promise<void> {
     this._streaming = new PromiseDelegate();
     this._controller = new AbortController();
     const responseHistory: ModelMessage[] = [];
+
+    // Add user message to history
+    responseHistory.push({
+      role: 'user',
+      content: message
+    });
+
     try {
       // Ensure we have an agent
       if (!this._agent) {
@@ -584,12 +593,6 @@ export class AgentManager implements IAgentManager {
       if (!this._agent) {
         throw new Error('Failed to initialize agent');
       }
-
-      // Add user message to history
-      responseHistory.push({
-        role: 'user',
-        content: message
-      });
 
       let continueLoop = true;
       while (continueLoop) {
@@ -647,9 +650,41 @@ export class AgentManager implements IAgentManager {
       this._history.push(...Private.sanitizeModelMessages(responseHistory));
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
+        let helpMessage = `${(error as Error).message}`;
+
+        // Remove attachments from history on payload rejection errors
+        if (
+          APICallError.isInstance(error) &&
+          (error.statusCode === 400 ||
+            error.statusCode === 404 ||
+            error.statusCode === 413 ||
+            error.statusCode === 415 ||
+            error.statusCode === 422)
+        ) {
+          for (const msg of [...this._history, ...responseHistory]) {
+            if (msg.role === 'user' && Array.isArray(msg.content)) {
+              const hasMedia = msg.content.some(p => p.type !== 'text');
+              if (hasMedia) {
+                const textContent = msg.content
+                  .filter(p => p.type === 'text')
+                  .map(p => (p as { text: string }).text)
+                  .join('\n');
+                msg.content =
+                  textContent || '_Attachment removed due to error_';
+              }
+            }
+          }
+          helpMessage +=
+            '\n\nAttachments have been removed from history. Please send your prompt again.';
+        }
         this._agentEvent.emit({
           type: 'error',
-          data: { error: error as Error }
+          data: { error: new Error(helpMessage) }
+        });
+        this._history.push(...Private.sanitizeModelMessages(responseHistory));
+        this._history.push({
+          role: 'assistant',
+          content: helpMessage
         });
       }
     } finally {
@@ -932,6 +967,9 @@ ${richOutputWorkflowInstruction}`;
           await this._handleApprovalRequest(part, processResult);
           break;
 
+        case 'error':
+          throw part.error;
+
         case 'finish-step':
           this._updateTokenUsage(part.usage, part.usage.inputTokens);
           break;
@@ -940,7 +978,7 @@ ${richOutputWorkflowInstruction}`;
           processResult.aborted = true;
           break;
 
-        // Ignore: text-start, text-end, finish, error, and others
+        // Ignore: text-start, text-end, finish, and others
         default:
           break;
       }
