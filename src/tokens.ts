@@ -1,4 +1,4 @@
-import { ActiveCellManager, IMessage, IMessageContent } from '@jupyter/chat';
+import { ActiveCellManager, IMessage } from '@jupyter/chat';
 import { VDomRenderer } from '@jupyterlab/apputils';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Token } from '@lumino/coreutils';
@@ -210,6 +210,18 @@ export interface IProviderModelInfo {
    * Default context window for the model in tokens.
    */
   contextWindow?: number;
+  /**
+   * Whether the model supports image inputs.
+   */
+  supportsImages?: boolean;
+  /**
+   * Whether the model supports PDF inputs.
+   */
+  supportsPdf?: boolean;
+  /**
+   * Whether the model supports audio inputs.
+   */
+  supportsAudio?: boolean;
 }
 
 export interface IProviderInfo {
@@ -588,10 +600,10 @@ export interface IAgentManager {
    */
   clearHistory(): Promise<void>;
   /**
-   * Sets the conversation history with a list of messages from the chat.
-   * @param messages The chat messages to set as history
+   * Sets the history from already-processed model messages.
+   * @param messages Pre-built model messages (may include binary content)
    */
-  setHistory(messages: IMessageContent[]): void;
+  setHistory(messages: ModelMessage[]): void;
   /**
    * Stops the current streaming response by aborting the request.
    */

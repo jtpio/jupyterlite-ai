@@ -36,7 +36,18 @@ import type { UserContent, ImagePart, FilePart, ModelMessage } from 'ai';
 
 import { AI_AVATAR } from './icons';
 
-import type { IAgentManager, IAISettingsModel, ITokenUsage } from './tokens';
+import type {
+  IAgentManager,
+  IAISettingsModel,
+  IProviderRegistry,
+  ITokenUsage
+} from './tokens';
+
+import {
+  modelSupportsAudio,
+  modelSupportsImages,
+  modelSupportsPdf
+} from './providers/model-info';
 
 /**
  * Tool call status types.
@@ -105,12 +116,20 @@ export class AIChatModel extends AbstractChatModel {
     this._user = options.user;
     this._agentManager = options.agentManager;
     this._contentsManager = options.contentsManager;
+    this._providerRegistry = options.providerRegistry;
 
     // Listen for agent events
     this._agentManager.agentEvent.connect(this._onAgentEvent, this);
 
     // Listen for settings changes to update chat behavior
     this._settingsModel.stateChanged.connect(this._onSettingsChanged, this);
+
+    // Rebuild history when the model changes
+    this._agentManager.activeProviderChanged.connect(
+      this._onModelChanged,
+      this
+    );
+    this._settingsModel.stateChanged.connect(this._onModelChanged, this);
 
     this._autosaveDebouncer = new Debouncer(this.save, 3000);
   }
@@ -329,23 +348,31 @@ export class AIChatModel extends AbstractChatModel {
       // Process attachments and add their content to the message
       let enhancedMessage: UserContent = message.body;
       if (this.input.attachments.length > 0) {
-        const { textContents, binaryParts } = await Private.processAttachments(
+        const providerConfig = this._settingsModel.getProvider(
+          this._agentManager.activeProvider
+        );
+        const supportsImages = modelSupportsImages(
+          providerConfig,
+          this._providerRegistry
+        );
+        const supportsPdf = modelSupportsPdf(
+          providerConfig,
+          this._providerRegistry
+        );
+        const supportsAudio = modelSupportsAudio(
+          providerConfig,
+          this._providerRegistry
+        );
+
+        enhancedMessage = await Private.processAttachments(
           this.input.attachments,
-          this.input.documentManager
+          this.input.documentManager,
+          message.body,
+          supportsImages,
+          supportsPdf,
+          supportsAudio
         );
         this.input.clearAttachments();
-
-        let textPart = message.body;
-        if (textContents.length > 0) {
-          textPart +=
-            '\n\n--- Attached Files ---\n' + textContents.join('\n\n');
-        }
-
-        if (binaryParts.length > 0) {
-          enhancedMessage = [{ type: 'text', text: textPart }, ...binaryParts];
-        } else {
-          enhancedMessage = textPart;
-        }
       }
 
       this.updateWriters([{ user: this._getAIUser() }]);
@@ -463,7 +490,7 @@ export class AIChatModel extends AbstractChatModel {
     });
     await this.clearMessages();
     this.messagesInserted(0, messages);
-    this._agentManager.setHistory(messages);
+    await this._rebuildHistory();
     this.autosave = content.metadata?.autosave ?? false;
     this.title = content.metadata?.title ?? null;
     return true;
@@ -568,6 +595,75 @@ export class AIChatModel extends AbstractChatModel {
     const config = this._settingsModel.config;
     this.config = { ...config, enableCodeToolbar: true };
     // Agent manager handles agent recreation automatically via its own settings listener
+  }
+
+  /**
+   * Rebuild history when the active model changes.
+   */
+  private _onModelChanged(): void {
+    const providerConfig = this._settingsModel.getProvider(
+      this._agentManager.activeProvider
+    );
+    const modelKey = providerConfig
+      ? `${providerConfig.provider}:${providerConfig.model}`
+      : undefined;
+    if (modelKey && modelKey !== this._currentModelKey) {
+      this._currentModelKey = modelKey;
+      this._rebuildHistory().catch(e =>
+        console.warn('Failed to rebuild history on model change:', e)
+      );
+    }
+  }
+
+  /**
+   * Rebuilds the agent history from the current messages.
+   * For vision-capable models, re-reads binary attachments from disk.
+   * For text-only models, uses message text only.
+   */
+  private async _rebuildHistory(): Promise<void> {
+    const providerConfig = this._settingsModel.getProvider(
+      this._agentManager.activeProvider
+    );
+    const supportsImages = modelSupportsImages(
+      providerConfig,
+      this._providerRegistry
+    );
+    const supportsPdf = modelSupportsPdf(
+      providerConfig,
+      this._providerRegistry
+    );
+    const supportsAudio = modelSupportsAudio(
+      providerConfig,
+      this._providerRegistry
+    );
+
+    const modelMessages: ModelMessage[] = [];
+    for (const msg of this.messages) {
+      const isAI = msg.sender.username === 'ai-assistant';
+      if (!isAI && msg.attachments?.length) {
+        const enhancedContent = await Private.processAttachments(
+          msg.attachments,
+          this.input.documentManager,
+          msg.body,
+          supportsImages,
+          supportsPdf,
+          supportsAudio
+        );
+
+        modelMessages.push({
+          role: 'user',
+          content: enhancedContent
+        } as ModelMessage);
+      } else if (msg.body) {
+        modelMessages.push({
+          role: isAI ? 'assistant' : 'user',
+          content: msg.body
+        } as ModelMessage);
+      }
+      // Skip messages with empty body like tool calls
+    }
+
+    this._agentManager.setHistory(modelMessages);
   }
 
   /**
@@ -951,6 +1047,8 @@ export class AIChatModel extends AbstractChatModel {
   private _user: IUser;
   private _toolContexts: Map<string, IToolExecutionContext> = new Map();
   private _agentManager: IAgentManager;
+  private _providerRegistry?: IProviderRegistry;
+  private _currentModelKey: string | undefined;
   private _currentStreamingMessage: IMessage | null = null;
   private _nameChanged = new Signal<AIChatModel, string>(this);
   private _contentsManager?: Contents.IManager;
@@ -1068,23 +1166,29 @@ namespace Private {
   }
 
   /**
-   * Processes file attachments and returns text contents and binary parts separately.
+   * Processes file attachments and returns the message content with the attachments.
    * @param attachments Array of file attachments to process
    * @param documentManager Optional document manager for file operations
-   * @returns Text contents and binary parts
+   * @param body The message body
+   * @param supportsImages Whether the model supports images
+   * @param supportsPdf Whether the model supports pdfs
+   * @param supportsAudio Whether the model supports audio
+   * @returns Enhanced message content
    */
   export async function processAttachments(
     attachments: IAttachment[],
-    documentManager: IDocumentManager | null | undefined
-  ): Promise<{
-    textContents: string[];
-    binaryParts: Array<ImagePart | FilePart>;
-  }> {
+    documentManager: IDocumentManager | null | undefined,
+    body: string,
+    supportsImages: boolean,
+    supportsPdf: boolean,
+    supportsAudio: boolean
+  ): Promise<UserContent> {
     const textContents: string[] = [];
-    const binaryParts: Array<ImagePart | FilePart> = [];
+    const includedParts: Array<ImagePart | FilePart> = [];
+    const omittedNames: string[] = [];
 
     if (!documentManager) {
-      return { textContents, binaryParts };
+      return body;
     }
 
     for (const attachment of attachments) {
@@ -1118,29 +1222,54 @@ namespace Private {
           }
 
           if (mimetype?.startsWith('image/')) {
-            const data = await readBinaryAttachment(
-              attachment,
-              documentManager
-            );
-            if (data) {
-              binaryParts.push({
-                type: 'image',
-                image: data,
-                mediaType: mimetype
-              });
+            if (supportsImages) {
+              const data = await readBinaryAttachment(
+                attachment,
+                documentManager
+              );
+              if (data) {
+                includedParts.push({
+                  type: 'image',
+                  image: data,
+                  mediaType: mimetype
+                });
+              }
+            } else {
+              omittedNames.push(PathExt.basename(attachment.value));
             }
           } else if (mimetype === 'application/pdf') {
-            const data = await readBinaryAttachment(
-              attachment,
-              documentManager
-            );
-            if (data) {
-              binaryParts.push({
-                type: 'file',
-                data,
-                mediaType: mimetype,
-                filename: PathExt.basename(attachment.value)
-              });
+            if (supportsPdf) {
+              const data = await readBinaryAttachment(
+                attachment,
+                documentManager
+              );
+              if (data) {
+                includedParts.push({
+                  type: 'file',
+                  data,
+                  mediaType: mimetype,
+                  filename: PathExt.basename(attachment.value)
+                });
+              }
+            } else {
+              omittedNames.push(PathExt.basename(attachment.value));
+            }
+          } else if (mimetype?.startsWith('audio/')) {
+            if (supportsAudio) {
+              const data = await readBinaryAttachment(
+                attachment,
+                documentManager
+              );
+              if (data) {
+                includedParts.push({
+                  type: 'file',
+                  data,
+                  mediaType: mimetype,
+                  filename: PathExt.basename(attachment.value)
+                });
+              }
+            } else {
+              omittedNames.push(PathExt.basename(attachment.value));
             }
           } else {
             const fileContent = await readFileAttachment(
@@ -1167,7 +1296,18 @@ namespace Private {
       }
     }
 
-    return { textContents, binaryParts };
+    let textPart = body;
+    if (textContents.length > 0) {
+      textPart += '\n\n--- Attached Files ---\n' + textContents.join('\n\n');
+    }
+
+    if (omittedNames.length > 0) {
+      textPart += `\n[Attachments omitted (not supported by this model): ${omittedNames.join(', ')}.]`;
+    }
+
+    return includedParts.length > 0
+      ? [{ type: 'text', text: textPart }, ...includedParts]
+      : textPart;
   }
 
   /**
@@ -1487,6 +1627,10 @@ export namespace AIChatModel {
      * The contents manager.
      */
     contentsManager?: Contents.IManager;
+    /**
+     * Optional provider registry for model capability lookups.
+     */
+    providerRegistry?: IProviderRegistry;
     /**
      * Whether to restore or not the message (default to true)
      */

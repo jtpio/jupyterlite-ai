@@ -760,11 +760,12 @@ function registerCommands(
     });
 
     const openInMain = (model: AIChatModel): MainAreaChat => {
+      const inputToolbarRegistry = inputToolbarFactory.create();
       const content = new ChatWidget({
         model,
         rmRegistry,
         themeManager: themeManager ?? null,
-        inputToolbarRegistry: inputToolbarFactory.create(),
+        inputToolbarRegistry,
         attachmentOpenerRegistry,
         chatCommandRegistry
       });

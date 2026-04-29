@@ -49,7 +49,8 @@ export class ChatModelHandler implements IChatModelHandler {
       agentManager,
       activeCellManager: this._activeCellManager,
       documentManager: this._docManager,
-      contentsManager: this._contentsManager
+      contentsManager: this._contentsManager,
+      providerRegistry: this._providerRegistry
     });
 
     messages?.forEach(message => {
