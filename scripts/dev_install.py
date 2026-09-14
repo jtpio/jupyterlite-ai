@@ -13,6 +13,7 @@ from pathlib import Path
 PYTHON_PACKAGES = [
     "python/jupyternaut-persona",
     "python/jupyterlite-ai",
+    "python/jupyternaut-terminal",
 ]
 
 
