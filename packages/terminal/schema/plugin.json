@@ -15,6 +15,13 @@
       "description": "The agent runtime of the jupyternaut command: 'ai-sdk' is the Jupyternaut agent built on the Vercel AI SDK, 'pi' is the pi-agent-core loop driven with the same model providers and tools. Use `jupyternaut --engine <name>` for one run.",
       "enum": ["ai-sdk", "pi"],
       "default": "ai-sdk"
+    },
+    "ui": {
+      "type": "string",
+      "title": "Terminal UI",
+      "description": "The user interface of the jupyternaut command: 'builtin' is the renderer of this extension (inline or full screen), 'pi' is the pi TUI (pi-tui) on the main screen. Use `jupyternaut --ui <name>` for one run.",
+      "enum": ["builtin", "pi"],
+      "default": "builtin"
     }
   },
   "additionalProperties": false

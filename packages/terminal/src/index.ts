@@ -13,7 +13,14 @@ import {
   IToolRegistry
 } from '@jupyternaut/agent';
 
-import { type AgentEngine, DEFAULT_ENGINE, isAgentEngine } from './runtime';
+import {
+  type AgentEngine,
+  DEFAULT_ENGINE,
+  DEFAULT_UI,
+  isAgentEngine,
+  isTerminalUi,
+  type TerminalUi
+} from './runtime';
 import { TerminalSessionManager } from './session';
 
 const COMMAND_NAME = 'jupyternaut';
@@ -87,6 +94,27 @@ function createEngineDetector(
 }
 
 /**
+ * The user interface to use, from this plugin's settings.
+ */
+function createUiDetector(
+  settingRegistry: ISettingRegistry | null
+): () => TerminalUi {
+  let ui: TerminalUi = DEFAULT_UI;
+  const update = (settings: ISettingRegistry.ISettings) => {
+    const value = settings.composite.ui;
+    ui = isTerminalUi(value) ? value : DEFAULT_UI;
+  };
+  settingRegistry
+    ?.load(PLUGIN_ID)
+    .then(settings => {
+      update(settings);
+      settings.changed.connect(update);
+    })
+    .catch(() => undefined);
+  return () => ui;
+}
+
+/**
  * Register the `jupyternaut` command in JupyterLite terminals.
  */
 const plugin: JupyterFrontEndPlugin<void> = {
@@ -120,7 +148,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       skillRegistry: skillRegistry ?? undefined,
       isDarkMode: createDarkModeDetector(settingRegistry),
       isFullScreen: createFullScreenDetector(settingRegistry),
-      engine: createEngineDetector(settingRegistry)
+      engine: createEngineDetector(settingRegistry),
+      ui: createUiDetector(settingRegistry)
     });
     client.registerExternalCommand({
       name: COMMAND_NAME,

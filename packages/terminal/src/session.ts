@@ -11,10 +11,13 @@ import {
 
 import { TerminalApp } from './app';
 import { PiAgent } from './pi/agent';
+import { PiTuiApp } from './pitui/app';
 import {
   type AgentEngine,
   type ITerminalAgent,
-  isAgentEngine
+  type TerminalUi,
+  isAgentEngine,
+  isTerminalUi
 } from './runtime';
 import { createTerminalTools, DRIVE_MOUNTPOINT, ShellRunner } from './tools';
 import { Tty } from './tty';
@@ -34,6 +37,10 @@ export interface ISessionOptions {
    * The agent runtime configured in the settings.
    */
   engine: () => AgentEngine;
+  /**
+   * The user interface configured in the settings.
+   */
+  ui: () => TerminalUi;
 }
 
 function terminalInstructions(cwd: string): string {
@@ -161,6 +168,14 @@ function parseEngine(args: string[]): AgentEngine | undefined {
 }
 
 /**
+ * The user interface requested on the command line: `--ui <name>`.
+ */
+function parseUi(args: string[]): TerminalUi | undefined {
+  const value = flagValue(args, '--ui');
+  return isTerminalUi(value) ? value : undefined;
+}
+
+/**
  * Maps terminals (cockle shell ids) to their sessions and runs the command.
  */
 export class TerminalSessionManager {
@@ -197,16 +212,23 @@ export class TerminalSessionManager {
     }
     const { app, settingsModel, providerRegistry, isDarkMode, isFullScreen } =
       this._options;
-    const terminalApp = new TerminalApp({
+    const options = {
       tty: new Tty(context),
       session,
       settingsModel,
       providerRegistry,
       isDarkMode,
+      openSettings: () => app.commands.execute(OPEN_SETTINGS_COMMAND)
+    };
+    const ui = parseUi(context.args) ?? this._options.ui();
+    if (ui === 'pi') {
+      return new PiTuiApp(options).run();
+    }
+    const terminalApp = new TerminalApp({
+      ...options,
       fullScreen: context.args.includes('--inline')
         ? false
-        : context.args.includes('--fullscreen') || isFullScreen(),
-      openSettings: () => app.commands.execute(OPEN_SETTINGS_COMMAND)
+        : context.args.includes('--fullscreen') || isFullScreen()
     });
     return terminalApp.run();
   }

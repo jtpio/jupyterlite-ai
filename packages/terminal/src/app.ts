@@ -17,6 +17,13 @@ import { parseBlocks, renderBlocks, renderInline } from './render/markdown';
 import { FullScreen, type ICaret, type IScreen, Screen } from './render/screen';
 import { ENGINE_LABELS, type ITerminalAgent } from './runtime';
 import type { TerminalSession } from './session';
+import {
+  approvalPreview,
+  approvalScope,
+  describeToolCall,
+  formatTokens,
+  summarizeResult
+} from './transcript';
 import type { Tty } from './tty';
 import { box } from './ui/box';
 import { LineEditor, renderInputBox } from './ui/input';
@@ -25,7 +32,6 @@ const SPINNER_FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '
 const SPINNER_INTERVAL_MS = 100;
 const RESIZE_POLL_MS = 500;
 const CTRL_C_EXIT_WINDOW_MS = 2000;
-const MAX_RESULT_LINES = 6;
 const MAX_BANNER_WIDTH = 64;
 const PLACEHOLDER = 'Ask anything, /help for commands';
 
@@ -86,69 +92,6 @@ export interface ITerminalAppOptions {
    * Use the alternate screen buffer with the prompt pinned at the bottom.
    */
   fullScreen: boolean;
-}
-
-function formatTokens(count: number): string {
-  if (count < 1000) {
-    return `${count}`;
-  }
-  if (count < 1000000) {
-    return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
-  }
-  return `${(count / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
-}
-
-function compactJson(value: unknown, max = 100): string {
-  let text: string;
-  try {
-    text = typeof value === 'string' ? value : JSON.stringify(value);
-  } catch {
-    text = String(value);
-  }
-  text = (text ?? '').replace(/\s+/g, ' ');
-  return text.length > max ? text.slice(0, max - 1) + '…' : text;
-}
-
-/**
- * Short description of a tool call shown next to its name.
- */
-function describeToolCall(name: string, args: unknown): string {
-  const input = (args ?? {}) as Record<string, unknown>;
-  switch (name) {
-    case 'shell':
-      return String(input.command ?? '');
-    case 'read_file':
-    case 'write_file':
-    case 'edit_file':
-      return String(input.path ?? '');
-    case 'list_files':
-      return String(input.path ?? '.');
-    case 'execute_command':
-      return String(input.commandId ?? '');
-    case 'browser_fetch':
-    case 'web_fetch':
-      return String(input.url ?? '');
-    case 'discover_commands':
-    case 'discover_skills':
-    case 'web_search':
-      return String(input.query ?? '');
-    case 'load_skill':
-      return String(input.name ?? '');
-    default:
-      return compactJson(input, 80);
-  }
-}
-
-/**
- * What a "don't ask again" answer covers: the JupyterLab command for
- * `execute_command`, the whole tool otherwise.
- */
-function approvalScope(name: string, args: unknown): string {
-  const input = (args ?? {}) as Record<string, unknown>;
-  if (name === 'execute_command' && typeof input.commandId === 'string') {
-    return `${name}:${input.commandId}`;
-  }
-  return name;
 }
 
 /**
@@ -735,8 +678,9 @@ export class TerminalApp {
         if (!item) {
           break;
         }
-        item.result = this._summarizeResult(
-          item,
+        item.result = summarizeResult(
+          item.name,
+          item.args,
           event.data.outputData,
           event.data.isError
         );
@@ -971,102 +915,6 @@ export class TerminalApp {
   }
 
   /**
-   * Lines shown under a tool call once its result is known.
-   */
-  private _summarizeResult(
-    item: IToolItem,
-    output: unknown,
-    isError: boolean
-  ): string[] {
-    const record = (
-      output && typeof output === 'object' ? output : {}
-    ) as Record<string, unknown>;
-    if (isError) {
-      const text =
-        typeof output === 'string'
-          ? output
-          : String(record.error ?? record.message ?? compactJson(output, 400));
-      return this._clipLines(text, MAX_RESULT_LINES).map(
-        line => theme.error + line + style.reset
-      );
-    }
-    switch (item.name) {
-      case 'shell': {
-        const text = String(record.output ?? '').replace(/\s+$/, '');
-        const lines = text
-          ? this._clipLines(text, MAX_RESULT_LINES)
-          : [style.dim + '(no output)' + style.reset];
-        if (record.exitCode !== 0 && record.exitCode !== undefined) {
-          lines.push(
-            theme.warning + `exit code ${record.exitCode}` + style.reset
-          );
-        }
-        return lines;
-      }
-      case 'read_file':
-        return [
-          style.dim +
-            `Read ${record.lines} line${record.lines === 1 ? '' : 's'}` +
-            (record.truncated ? ` of ${record.totalLines}` : '') +
-            style.reset
-        ];
-      case 'write_file':
-        return [style.dim + `Wrote ${record.bytes} bytes` + style.reset];
-      case 'edit_file': {
-        const args = (item.args ?? {}) as Record<string, unknown>;
-        const lines = [
-          style.dim +
-            `Replaced ${record.replacements} occurrence${record.replacements === 1 ? '' : 's'}` +
-            style.reset
-        ];
-        const removed = String(args.old_string ?? '')
-          .split('\n')
-          .slice(0, 3);
-        const added = String(args.new_string ?? '')
-          .split('\n')
-          .slice(0, 3);
-        lines.push(
-          ...removed.map(line => theme.error + '- ' + line + style.reset)
-        );
-        lines.push(
-          ...added.map(line => theme.success + '+ ' + line + style.reset)
-        );
-        return lines;
-      }
-      case 'list_files': {
-        const entries =
-          (record.entries as { name: string; type: string }[] | undefined) ??
-          [];
-        const names = entries.map(entry =>
-          entry.type === 'directory' ? entry.name + '/' : entry.name
-        );
-        return this._clipLines(
-          names.length ? names.join('  ') : String(record.output ?? '(empty)'),
-          MAX_RESULT_LINES
-        );
-      }
-      default:
-        return this._clipLines(
-          typeof output === 'string'
-            ? output
-            : (JSON.stringify(output, null, 1) ?? ''),
-          MAX_RESULT_LINES
-        );
-    }
-  }
-
-  private _clipLines(text: string, max: number): string[] {
-    const lines = text.split('\n');
-    if (lines.length <= max) {
-      return lines;
-    }
-    return [
-      ...lines.slice(0, max),
-      style.dim + `… +${lines.length - max} lines` + style.reset
-    ];
-  }
-
-  /**
    * Render the streaming message and count the lines of its finished blocks.
    */
   private _renderStreaming(item: IAssistantItem): {
@@ -1179,46 +1027,10 @@ export class TerminalApp {
     return `${info?.name ?? config.provider} · ${config.model}`;
   }
 
-  /**
-   * Lines describing what a tool call is about to do.
-   */
-  private _approvalPreview(approval: IApproval, width: number): string[] {
-    const input = (approval.args ?? {}) as Record<string, unknown>;
-    const clip = (text: string, max: number) =>
-      this._clipLines(text.replace(/\n$/, ''), max);
-    switch (approval.toolName) {
-      case 'write_file':
-        return [
-          String(input.path ?? ''),
-          '',
-          ...clip(String(input.content ?? ''), 12).map(
-            line => theme.success + '+ ' + style.reset + line
-          )
-        ];
-      case 'edit_file':
-        return [
-          String(input.path ?? ''),
-          '',
-          ...clip(String(input.old_string ?? ''), 8).map(
-            line => theme.error + '- ' + style.reset + line
-          ),
-          ...clip(String(input.new_string ?? ''), 8).map(
-            line => theme.success + '+ ' + style.reset + line
-          )
-        ];
-      default: {
-        const detail =
-          describeToolCall(approval.toolName, approval.args) ||
-          compactJson(approval.args, 300);
-        return wrapAnsi(detail, width - 4).slice(0, 8);
-      }
-    }
-  }
-
   private _renderApproval(approval: IApproval): string[] {
     const width = Math.min(this._width, 100);
     const rows = [
-      ...this._approvalPreview(approval, width),
+      ...approvalPreview(approval.toolName, approval.args, width),
       '',
       ...[
         'Yes',

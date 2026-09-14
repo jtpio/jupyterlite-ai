@@ -19,6 +19,17 @@ export const ENGINE_LABELS: Record<AgentEngine, string> = {
 };
 
 /**
+ * The terminal user interfaces: the built-in renderer or the pi TUI.
+ */
+export type TerminalUi = 'builtin' | 'pi';
+
+export const DEFAULT_UI: TerminalUi = 'builtin';
+
+export function isTerminalUi(value: unknown): value is TerminalUi {
+  return value === 'builtin' || value === 'pi';
+}
+
+/**
  * The part of an agent manager the terminal UI needs. The AI SDK agent of
  * `@jupyternaut/agent` and the pi agent both provide it.
  */

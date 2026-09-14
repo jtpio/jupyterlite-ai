@@ -108,6 +108,23 @@ jupyternaut --engine pi
 Changing the engine starts a new conversation in that terminal. The banner
 shows the active engine.
 
+## Terminal UI
+
+The command can also draw its interface with two renderers:
+
+| UI        | Description                                                                           |
+| --------- | ------------------------------------------------------------------------------------- |
+| `builtin` | The renderer of this extension, inline or full screen (default)                       |
+| `pi`      | The [pi](https://pi.dev) TUI components (`@earendil-works/pi-tui`) on the main screen |
+
+Both work with either engine. The pi UI keeps the transcript in the terminal
+scrollback and uses the pi editor, markdown renderer and select lists. Select
+it in the settings editor under "Jupyternaut Terminal", or for one run:
+
+```bash
+jupyternaut --ui pi
+```
+
 ## Limitations
 
 - The `cockle` shell has no Python or Node: use the notebook and kernel
