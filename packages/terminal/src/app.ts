@@ -15,6 +15,7 @@ import {
 } from './render/ansi';
 import { parseBlocks, renderBlocks, renderInline } from './render/markdown';
 import { FullScreen, type ICaret, type IScreen, Screen } from './render/screen';
+import { ENGINE_LABELS, type ITerminalAgent } from './runtime';
 import type { TerminalSession } from './session';
 import type { Tty } from './tty';
 import { box } from './ui/box';
@@ -680,10 +681,7 @@ export class TerminalApp {
   // Agent events
   // ---------------------------------------------------------------------
 
-  private _onAgentEvent(
-    _: IAgentManager,
-    event: IAgentManager.IAgentEvent
-  ): void {
+  private _onAgentEvent(_: unknown, event: IAgentManager.IAgentEvent): void {
     if (this._mode === 'done') {
       return;
     }
@@ -1281,6 +1279,10 @@ export class TerminalApp {
         style.reset,
       '',
       style.dim + '  model  ' + style.reset + this._providerLabel(),
+      style.dim +
+        '  engine ' +
+        style.reset +
+        ENGINE_LABELS[this._session.engine],
       style.dim + '  cwd    ' + style.reset + this._session.cwd,
       '',
       style.dim +
@@ -1326,7 +1328,7 @@ export class TerminalApp {
 
   private _tty: Tty;
   private _session: TerminalSession;
-  private _agent: IAgentManager;
+  private _agent: ITerminalAgent;
   private _settingsModel: IAISettingsModel;
   private _providerRegistry?: IProviderRegistry;
   private _isDarkMode: () => boolean;

@@ -87,6 +87,27 @@ jupyternaut --inline
 
 Use `--fullscreen` to force the full screen mode for one run.
 
+## Agent engines
+
+The command can run the conversation with two agent runtimes:
+
+| Engine   | Description                                                                                           |
+| -------- | ----------------------------------------------------------------------------------------------------- |
+| `ai-sdk` | The Jupyternaut agent of `@jupyternaut/agent`, built on the Vercel AI SDK (default)                   |
+| `pi`     | The agent loop of [pi](https://pi.dev) (`@earendil-works/pi-agent-core`), driven with the same models |
+
+Both engines use the providers, API keys, tools and skills configured in the
+AI settings: the `pi` engine plugs the AI SDK model of the active provider into
+the pi loop, so no pi provider configuration is needed. Select the engine in
+the settings editor under "Jupyternaut Terminal", or for one run:
+
+```bash
+jupyternaut --engine pi
+```
+
+Changing the engine starts a new conversation in that terminal. The banner
+shows the active engine.
+
 ## Limitations
 
 - The `cockle` shell has no Python or Node: use the notebook and kernel

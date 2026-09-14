@@ -8,6 +8,13 @@
       "title": "Full screen mode",
       "description": "Run the agent in the alternate screen buffer with its own scrolling, so the prompt stays at the bottom while the transcript scrolls. When disabled, the transcript is printed in the terminal scrollback and the prompt scrolls with it.",
       "default": true
+    },
+    "engine": {
+      "type": "string",
+      "title": "Agent engine",
+      "description": "The agent runtime of the jupyternaut command: 'ai-sdk' is the Jupyternaut agent built on the Vercel AI SDK, 'pi' is the pi-agent-core loop driven with the same model providers and tools. Use `jupyternaut --engine <name>` for one run.",
+      "enum": ["ai-sdk", "pi"],
+      "default": "ai-sdk"
     }
   },
   "additionalProperties": false

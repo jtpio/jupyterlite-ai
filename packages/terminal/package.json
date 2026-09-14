@@ -44,6 +44,8 @@
     "watch:labextension": "jupyter-builder watch ."
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@jupyterlab/application": "^4.5.8",
     "@jupyterlab/coreutils": "^6.5.8",
     "@jupyterlab/services": "^7.5.8",
