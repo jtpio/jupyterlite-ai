@@ -456,6 +456,11 @@ export namespace IAgentManager {
      * Optional render mime registry for discovering supported MIME types.
      */
     renderMimeRegistry?: IRenderMimeRegistry;
+
+    /**
+     * Extra instructions appended to the system prompt of this agent.
+     */
+    additionalInstructions?: string;
   }
 
   /**
@@ -627,6 +632,13 @@ export interface IAgentManagerFactory {
    * Gets the MCP tools from connected servers
    */
   getMCPTools(): Promise<ToolMap>;
+  /**
+   * Create the language model of a configured provider, with its API key
+   * resolved from the secrets manager or the settings. Lets other agent
+   * runtimes use the connections configured in the AI settings.
+   * @param providerId The id of the provider config.
+   */
+  createModel(providerId: string): Promise<LanguageModel>;
 }
 
 /*

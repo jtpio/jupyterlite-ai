@@ -97,6 +97,10 @@ export namespace AgentManagerFactory {
      */
     secretsManager?: ISecretsManager;
     /**
+     * The provider registry, used to create models for `createModel`.
+     */
+    providerRegistry?: IProviderRegistry;
+    /**
      * The token used to request the secrets manager.
      */
     token: symbol | null;
@@ -113,6 +117,7 @@ export class AgentManagerFactory implements IAgentManagerFactory {
     this._skillRegistry = options.skillRegistry;
     this._mcpManager = options.mcpManager;
     this._secretsManager = options.secretsManager;
+    this._providerRegistry = options.providerRegistry;
     this._mcpClients = [];
     this._mcpConnectionChanged = new Signal<this, boolean>(this);
 
@@ -180,6 +185,18 @@ export class AgentManagerFactory implements IAgentManagerFactory {
    */
   isMCPServerConnected(serverName: string): boolean {
     return this._mcpClients.some(wrapper => wrapper.name === serverName);
+  }
+
+  /**
+   * Create the language model of a configured provider.
+   */
+  createModel(providerId: string): Promise<LanguageModel> {
+    return Private.createProviderModel({
+      providerId,
+      settingsModel: this._settingsModel,
+      providerRegistry: this._providerRegistry,
+      secretsManager: this._secretsManager
+    });
   }
 
   /**
@@ -300,6 +317,7 @@ export class AgentManagerFactory implements IAgentManagerFactory {
   private _settingsModel: IAISettingsModel;
   private _skillRegistry?: ISkillRegistry;
   private _secretsManager?: ISecretsManager;
+  private _providerRegistry?: IProviderRegistry;
   private _mcpManager?: IMcpManager;
   private _mcpClients: IMCPClientWrapper[];
   private _mcpConnectionChanged: Signal<this, boolean>;
@@ -357,6 +375,7 @@ export class AgentManager implements IAgentManager {
     this._skills = [];
     this._agentConfig = null;
     this._renderMimeRegistry = options.renderMimeRegistry;
+    this._additionalInstructions = options.additionalInstructions;
     this._streaming.resolve();
 
     this.activeProvider =
@@ -930,7 +949,7 @@ RICH OUTPUT RENDERING:
 - ${supportedMimeTypesInstruction}
 - Use only MIME types from the supported list when creating MIME bundles. Do not invent MIME keys.
 - Do not claim that you cannot display maps, images, or rich outputs in chat.
-${richOutputWorkflowInstruction}`;
+${richOutputWorkflowInstruction}${this._additionalInstructions ? `\n\n${this._additionalInstructions}` : ''}`;
 
     this._agent = new ToolLoopAgent({
       model,
@@ -1133,6 +1152,9 @@ ${richOutputWorkflowInstruction}`;
   ): Promise<void> {
     const { approvalId, toolCall } = part;
 
+    // Register the pending approval first so that a listener can answer
+    // synchronously while handling the event.
+    const approval = this._waitForApproval(toolCall.toolCallId);
     this._agentEvent.emit({
       type: 'tool_approval_request',
       data: {
@@ -1142,19 +1164,24 @@ ${richOutputWorkflowInstruction}`;
       }
     });
 
-    const approved = await this._waitForApproval(toolCall.toolCallId);
+    const approved = await approval;
 
     result.approvalProcessed = true;
-    result.approvalResponse = {
-      role: 'tool',
-      content: [
-        {
-          type: 'tool-approval-response',
-          approvalId,
-          approved
-        }
-      ]
+    // A step can request approval for several tool calls; every response
+    // must be sent back or the model call fails with a missing tool result.
+    const response = {
+      type: 'tool-approval-response' as const,
+      approvalId,
+      approved
     };
+    if (
+      result.approvalResponse &&
+      Array.isArray(result.approvalResponse.content)
+    ) {
+      (result.approvalResponse.content as unknown[]).push(response);
+    } else {
+      result.approvalResponse = { role: 'tool', content: [response] };
+    }
   }
 
   /**
@@ -1210,52 +1237,16 @@ ${richOutputWorkflowInstruction}`;
    * Creates a model instance based on current settings.
    * @returns The configured model instance for the agent
    */
-  private async _createModel() {
+  private _createModel(): Promise<LanguageModel> {
     if (!this._activeProvider) {
       throw new Error('No active provider configured');
     }
-    const activeProviderConfig = this._settingsModel.getProvider(
-      this._activeProvider
-    );
-    if (!activeProviderConfig) {
-      throw new Error('No active provider configured');
-    }
-    const provider = activeProviderConfig.provider;
-    const model = activeProviderConfig.model;
-    const baseURL = activeProviderConfig.baseURL;
-
-    let apiKey: string;
-    if (this._secretsManager && this._settingsModel.config.useSecretsManager) {
-      const token = Private.getToken();
-      if (!token) {
-        // This should never happen, the secrets manager should be disabled.
-        console.error(
-          '@jupyterlite/ai::AgentManager error: the settings manager token is not set.\nYou should disable the the secrets manager from the AI settings.'
-        );
-        apiKey = '';
-      } else {
-        apiKey =
-          (
-            await this._secretsManager.get(
-              token,
-              SECRETS_NAMESPACE,
-              `${provider}:apiKey`
-            )
-          )?.value ?? '';
-      }
-    } else {
-      apiKey = this._settingsModel.getApiKey(activeProviderConfig.id);
-    }
-
-    return createModel(
-      {
-        provider,
-        model,
-        apiKey,
-        baseURL
-      },
-      this._providerRegistry
-    );
+    return Private.createProviderModel({
+      providerId: this._activeProvider,
+      settingsModel: this._settingsModel,
+      providerRegistry: this._providerRegistry,
+      secretsManager: this._secretsManager
+    });
   }
 
   /**
@@ -1346,6 +1337,7 @@ WEB RETRIEVAL POLICY:
   private _activeProviderChanged = new Signal<this, string | undefined>(this);
   private _skills: ISkillSummary[];
   private _renderMimeRegistry?: IRenderMimeRegistry;
+  private _additionalInstructions?: string;
   private _initQueue: Promise<void> = Promise.resolve();
   private _agentConfig: IAgentConfig | null;
   private _pendingApprovals: Map<
@@ -1557,5 +1549,48 @@ namespace Private {
   }
   export function getToken(): symbol | null {
     return secretsToken;
+  }
+
+  /**
+   * Create the language model of a provider config, with the API key taken
+   * from the secrets manager when it is in use.
+   */
+  export async function createProviderModel(options: {
+    providerId: string;
+    settingsModel: IAISettingsModel;
+    providerRegistry?: IProviderRegistry;
+    secretsManager?: ISecretsManager;
+  }): Promise<LanguageModel> {
+    const { settingsModel, providerRegistry, secretsManager } = options;
+    const providerConfig = settingsModel.getProvider(options.providerId);
+    if (!providerConfig) {
+      throw new Error('No active provider configured');
+    }
+    const { provider, model, baseURL } = providerConfig;
+
+    let apiKey: string;
+    if (secretsManager && settingsModel.config.useSecretsManager) {
+      const token = getToken();
+      if (!token) {
+        // This should never happen, the secrets manager should be disabled.
+        console.error(
+          '@jupyterlite/ai::AgentManager error: the settings manager token is not set.\nYou should disable the the secrets manager from the AI settings.'
+        );
+        apiKey = '';
+      } else {
+        apiKey =
+          (
+            await secretsManager.get(
+              token,
+              SECRETS_NAMESPACE,
+              `${provider}:apiKey`
+            )
+          )?.value ?? '';
+      }
+    } else {
+      apiKey = settingsModel.getApiKey(providerConfig.id);
+    }
+
+    return createModel({ provider, model, apiKey, baseURL }, providerRegistry);
   }
 }
