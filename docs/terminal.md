@@ -51,30 +51,46 @@ Choose "don't ask again" to allow a tool for the rest of the session.
 
 ### Slash commands and shortcuts
 
-| Input           | Effect                                                |
-| --------------- | ----------------------------------------------------- |
-| `/help`         | Show the commands and shortcuts                       |
-| `/model`        | Switch the provider and model                         |
-| `/tools`        | List the tools available to the agent                 |
-| `/clear`        | Clear the conversation                                |
-| `/settings`     | Open the AI settings panel                            |
-| `/exit`         | Leave the agent                                       |
-| `/`             | List the commands, `↑↓` select, `tab` or `enter` pick |
-| `esc`           | Interrupt the current response                        |
-| `ctrl+c`        | Clear the prompt, press twice to exit                 |
-| `pgup` / `pgdn` | Scroll the transcript                                 |
-| `\` + enter     | Insert a newline in the prompt                        |
+The interface is drawn with the [pi](https://pi.dev) terminal UI components
+(`@earendil-works/pi-tui`): the prompt editor, the markdown renderer and the
+selection lists are the ones of the pi coding agent.
+
+| Input           | Effect                                            |
+| --------------- | ------------------------------------------------- |
+| `/help`         | Show the commands and shortcuts                   |
+| `/model`        | Switch the provider and model                     |
+| `/tools`        | List the tools available to the agent             |
+| `/clear`        | Clear the conversation                            |
+| `/settings`     | Open the AI settings panel                        |
+| `/exit`         | Leave the agent                                   |
+| `/`             | Open the command list, `tab` or `enter` completes |
+| `esc`           | Interrupt the current response                    |
+| `ctrl+c`        | Clear the prompt, press twice to exit             |
+| `up` / `down`   | Browse the prompt history                         |
+| `shift+enter`   | Insert a newline in the prompt (or `\` + `enter`) |
+| `pgup` / `pgdn` | Scroll the transcript in full screen mode         |
 
 The conversation is kept while the terminal stays open, so running
 `jupyternaut` again continues where you left off.
 
-## Screen
+## Full screen and inline modes
 
-The agent uses the alternate screen buffer, like `vim`: the transcript scrolls
-above a prompt that stays at the bottom. Scroll with the mouse wheel, `pgup`
-and `pgdn`; `end` follows the output again. Selecting text needs Option+drag on
-macOS or Shift+drag elsewhere because the mouse wheel is tracked. The
+By default the agent runs in full screen mode: it uses the alternate screen
+buffer, like `vim`, and the transcript scrolls above a prompt that stays at the
+bottom. Scroll with the mouse wheel, `pgup` and `pgdn`; `end` follows the
+output again and `ctrl+shift+f` searches the transcript. Drag with the mouse to
+select text, it is copied to the clipboard when the button is released. The
 transcript is printed back to the terminal when the agent exits.
+
+The inline mode prints the transcript in the terminal scrollback as it goes,
+and the prompt box scrolls with it. Disable "Full screen mode" in the settings
+editor under "Jupyternaut Terminal", or for one run:
+
+```bash
+jupyternaut --inline
+```
+
+Use `--fullscreen` to force the full screen mode for one run.
 
 ## Limitations
 

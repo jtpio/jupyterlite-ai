@@ -22,6 +22,7 @@ export interface ISessionOptions {
   providerRegistry?: IProviderRegistry;
   toolRegistry?: IToolRegistry;
   isDarkMode: () => boolean;
+  isFullScreen: () => boolean;
 }
 
 function terminalInstructions(cwd: string): string {
@@ -128,13 +129,17 @@ export class TerminalSessionManager {
     } catch (error) {
       console.warn('Jupyternaut: cannot start the headless shell', error);
     }
-    const { app, settingsModel, providerRegistry, isDarkMode } = this._options;
+    const { app, settingsModel, providerRegistry, isDarkMode, isFullScreen } =
+      this._options;
     const terminalApp = new TerminalApp({
       tty: new Tty(context),
       session,
       settingsModel,
       providerRegistry,
       isDarkMode,
+      fullScreen: context.args.includes('--inline')
+        ? false
+        : context.args.includes('--fullscreen') || isFullScreen(),
       openSettings: () => app.commands.execute(OPEN_SETTINGS_COMMAND)
     });
     return terminalApp.run();

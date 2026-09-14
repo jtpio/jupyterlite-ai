@@ -2,12 +2,10 @@ import { getProviderModelInfo } from '@jupyternaut/agent';
 import type {
   IProviderConfig,
   IProviderParameters,
-  IProviderRegistry,
-  IProviderToolCapabilities
+  IProviderRegistry
 } from '@jupyternaut/agent';
 import type { TranslationBundle } from '@jupyterlab/translation';
 import ExpandMore from '@mui/icons-material/ExpandMore';
-import Delete from '@mui/icons-material/Delete';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import {
@@ -27,9 +25,6 @@ import {
   IconButton,
   InputAdornment,
   InputLabel,
-  List,
-  ListItem,
-  ListItemText,
   MenuItem,
   Select,
   Slider,
@@ -44,79 +39,6 @@ import React from 'react';
  */
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_TURNS = 25;
-type DomainSection = 'webSearch' | 'webFetch';
-type DomainKey = 'allowedDomains' | 'blockedDomains';
-type DomainFieldId = `${DomainSection}.${DomainKey}`;
-
-const DOMAIN_FIELD_MAP: Record<
-  DomainFieldId,
-  { section: DomainSection; key: DomainKey }
-> = {
-  'webSearch.allowedDomains': {
-    section: 'webSearch',
-    key: 'allowedDomains'
-  },
-  'webSearch.blockedDomains': {
-    section: 'webSearch',
-    key: 'blockedDomains'
-  },
-  'webFetch.allowedDomains': {
-    section: 'webFetch',
-    key: 'allowedDomains'
-  },
-  'webFetch.blockedDomains': {
-    section: 'webFetch',
-    key: 'blockedDomains'
-  }
-};
-
-function createEmptyDomainInputs(): Record<DomainFieldId, string> {
-  return {
-    'webSearch.allowedDomains': '',
-    'webSearch.blockedDomains': '',
-    'webFetch.allowedDomains': '',
-    'webFetch.blockedDomains': ''
-  };
-}
-
-function toRecord(value: unknown): Record<string, any> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, any>;
-  }
-  return {};
-}
-
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is string => typeof item === 'string');
-}
-
-function sanitizeCustomSettingsForProvider(
-  customSettings: Record<string, any>,
-  capabilities?: IProviderToolCapabilities
-): Record<string, any> {
-  const result: Record<string, any> = { ...customSettings };
-  const webSearch = toRecord(customSettings.webSearch);
-  const webFetch = toRecord(customSettings.webFetch);
-  const supportsWebSearch = !!capabilities?.webSearch;
-  const supportsWebFetch = !!capabilities?.webFetch;
-
-  if (supportsWebSearch && webSearch.enabled === true) {
-    result.webSearch = webSearch;
-  } else {
-    delete result.webSearch;
-  }
-
-  if (supportsWebFetch && webFetch.enabled === true) {
-    result.webFetch = webFetch;
-  } else {
-    delete result.webFetch;
-  }
-
-  return result;
-}
 
 interface IProviderConfigDialogProps {
   open: boolean;
@@ -151,13 +73,6 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
   const [apiKey, setApiKey] = React.useState(initialConfig?.apiKey || '');
   const [baseURL, setBaseURL] = React.useState(initialConfig?.baseURL || '');
   const [showApiKey, setShowApiKey] = React.useState(false);
-  const [customSettings, setCustomSettings] = React.useState<
-    Record<string, any>
-  >(initialConfig?.customSettings || {});
-  const [domainInputs, setDomainInputs] = React.useState<
-    Record<DomainFieldId, string>
-  >(createEmptyDomainInputs());
-
   const [parameters, setParameters] = React.useState<IProviderParameters>(
     initialConfig?.parameters || {}
   );
@@ -167,23 +82,9 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
     () => providerRegistry.getProviderInfo(provider),
     [providerRegistry, provider]
   );
-  const providerToolCapabilities =
-    selectedProviderInfo?.providerToolCapabilities;
   const selectedModelInfo = React.useMemo(
     () => getProviderModelInfo(selectedProviderInfo, model),
     [selectedProviderInfo, model]
-  );
-  const webSearchImplementation =
-    providerToolCapabilities?.webSearch?.implementation;
-  const supportsWebSearch = !!providerToolCapabilities?.webSearch;
-  const supportsWebFetch = !!providerToolCapabilities?.webFetch;
-  const webSearchSettings = React.useMemo(
-    () => toRecord(customSettings.webSearch),
-    [customSettings]
-  );
-  const webFetchSettings = React.useMemo(
-    () => toRecord(customSettings.webFetch),
-    [customSettings]
   );
 
   // Get provider options from registry
@@ -219,13 +120,10 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
       setApiKey(initialConfig?.apiKey || '');
       setBaseURL(initialConfig?.baseURL || '');
       setParameters(initialConfig?.parameters || {});
-      setCustomSettings(initialConfig?.customSettings || {});
-      setDomainInputs(createEmptyDomainInputs());
       setShowApiKey(false);
       setExpandedAdvanced(false);
     } else {
       // Reset expanded state when dialog closes
-      setDomainInputs(createEmptyDomainInputs());
       setExpandedAdvanced(false);
     }
   }, [open, initialConfig, providerRegistry]);
@@ -248,160 +146,6 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
     [providerRegistry]
   );
 
-  const updateCustomSetting = React.useCallback(
-    (section: 'webSearch' | 'webFetch', key: string, value: unknown) => {
-      setCustomSettings(prev => {
-        const next = { ...prev };
-        const sectionSettings = { ...toRecord(next[section]) };
-        const shouldDelete =
-          value === undefined ||
-          value === null ||
-          value === '' ||
-          (Array.isArray(value) && value.length === 0);
-
-        if (shouldDelete) {
-          delete sectionSettings[key];
-        } else {
-          sectionSettings[key] = value;
-        }
-
-        if (Object.keys(sectionSettings).length === 0) {
-          delete next[section];
-        } else {
-          next[section] = sectionSettings;
-        }
-
-        return next;
-      });
-    },
-    []
-  );
-
-  const addDomainValue = React.useCallback(
-    (fieldId: DomainFieldId) => {
-      const valueToAdd = domainInputs[fieldId].trim();
-      if (!valueToAdd) {
-        return;
-      }
-
-      const { section, key } = DOMAIN_FIELD_MAP[fieldId];
-      const currentValues = toStringArray(
-        toRecord(customSettings[section])[key]
-      );
-      if (currentValues.includes(valueToAdd)) {
-        setDomainInputs(prev => ({
-          ...prev,
-          [fieldId]: ''
-        }));
-        return;
-      }
-      const nextValues = [...currentValues, valueToAdd];
-
-      updateCustomSetting(section, key, nextValues);
-      setDomainInputs(prev => ({
-        ...prev,
-        [fieldId]: ''
-      }));
-    },
-    [customSettings, domainInputs, updateCustomSetting]
-  );
-
-  const removeDomainValue = React.useCallback(
-    (fieldId: DomainFieldId, valueToRemove: string) => {
-      const { section, key } = DOMAIN_FIELD_MAP[fieldId];
-      const currentValues = toStringArray(
-        toRecord(customSettings[section])[key]
-      );
-      const nextValues = currentValues.filter(value => value !== valueToRemove);
-      updateCustomSetting(
-        section,
-        key,
-        nextValues.length > 0 ? nextValues : undefined
-      );
-    },
-    [customSettings, updateCustomSetting]
-  );
-
-  const renderDomainList = React.useCallback(
-    (
-      fieldId: DomainFieldId,
-      label: string,
-      placeholder: string,
-      values: unknown
-    ) => {
-      const domainValues = toStringArray(values);
-
-      return (
-        <Box>
-          <Typography variant="body2" gutterBottom>
-            {label}
-          </Typography>
-          <List
-            dense
-            sx={{
-              mb: 1,
-              maxHeight: 160,
-              overflow: 'auto',
-              border: 1,
-              borderColor: 'divider',
-              borderRadius: 1
-            }}
-          >
-            {domainValues.length === 0 ? (
-              <ListItem>
-                <ListItemText
-                  secondary={trans.__('No domains added.')}
-                  slotProps={{
-                    secondary: {
-                      color: 'text.secondary'
-                    }
-                  }}
-                />
-              </ListItem>
-            ) : (
-              domainValues.map(value => (
-                <ListItem
-                  key={value}
-                  secondaryAction={
-                    <IconButton
-                      onClick={() => removeDomainValue(fieldId, value)}
-                      size="small"
-                    >
-                      <Delete fontSize="small" />
-                    </IconButton>
-                  }
-                >
-                  <ListItemText primary={value} />
-                </ListItem>
-              ))
-            )}
-          </List>
-          <TextField
-            fullWidth
-            size="small"
-            label={trans.__('Add Domain')}
-            value={domainInputs[fieldId]}
-            onChange={e =>
-              setDomainInputs(prev => ({
-                ...prev,
-                [fieldId]: e.target.value
-              }))
-            }
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                addDomainValue(fieldId);
-              }
-            }}
-            placeholder={placeholder}
-            helperText={trans.__('Press Enter to add one domain.')}
-          />
-        </Box>
-      );
-    },
-    [addDomainValue, domainInputs, removeDomainValue, trans]
-  );
-
   const handleSave = () => {
     if (!name.trim() || !provider || !model) {
       return;
@@ -411,10 +155,6 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
     const hasParameters = Object.keys(parameters).some(
       key => parameters[key as keyof IProviderParameters] !== undefined
     );
-    const sanitizedCustomSettings = sanitizeCustomSettingsForProvider(
-      customSettings,
-      providerToolCapabilities
-    );
 
     const config: Omit<IProviderConfig, 'id'> = {
       name: name.trim(),
@@ -422,10 +162,7 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
       model,
       ...(apiKey && { apiKey }),
       ...(baseURL && { baseURL }),
-      ...(hasParameters && { parameters }),
-      ...(Object.keys(sanitizedCustomSettings).length > 0 && {
-        customSettings: sanitizedCustomSettings
-      })
+      ...(hasParameters && { parameters })
     };
 
     onSave(config);
@@ -753,234 +490,6 @@ export const ProviderConfigDialog: React.FC<IProviderConfigDialogProps> = ({
                   }
                   label={trans.__('Use filter text')}
                 />
-
-                {(supportsWebSearch || supportsWebFetch) && (
-                  <>
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{ mt: 2, mb: 1 }}
-                    >
-                      {trans.__('Provider Web Tools')}
-                    </Typography>
-
-                    {supportsWebSearch && (
-                      <>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={webSearchSettings.enabled === true}
-                              onChange={e =>
-                                updateCustomSetting(
-                                  'webSearch',
-                                  'enabled',
-                                  e.target.checked
-                                )
-                              }
-                            />
-                          }
-                          label={trans.__('Enable Web Search')}
-                        />
-
-                        {webSearchSettings.enabled === true && (
-                          <Box
-                            sx={{
-                              pl: 2,
-                              borderLeft: 2,
-                              borderColor: 'divider',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 1.5
-                            }}
-                          >
-                            {(webSearchImplementation === 'openai' ||
-                              webSearchImplementation === 'anthropic') &&
-                              renderDomainList(
-                                'webSearch.allowedDomains',
-                                trans.__('Allowed Domains'),
-                                trans.__('example.com'),
-                                webSearchSettings.allowedDomains
-                              )}
-
-                            {webSearchImplementation === 'openai' && (
-                              <>
-                                <FormControl fullWidth>
-                                  <InputLabel>
-                                    {trans.__('Search Context Size')}
-                                  </InputLabel>
-                                  <Select
-                                    value={
-                                      webSearchSettings.searchContextSize ??
-                                      'medium'
-                                    }
-                                    label={trans.__('Search Context Size')}
-                                    onChange={e =>
-                                      updateCustomSetting(
-                                        'webSearch',
-                                        'searchContextSize',
-                                        e.target.value
-                                      )
-                                    }
-                                  >
-                                    <MenuItem value="low">
-                                      {trans.__('Low')}
-                                    </MenuItem>
-                                    <MenuItem value="medium">
-                                      {trans.__('Medium')}
-                                    </MenuItem>
-                                    <MenuItem value="high">
-                                      {trans.__('High')}
-                                    </MenuItem>
-                                  </Select>
-                                </FormControl>
-                                <FormControlLabel
-                                  control={
-                                    <Switch
-                                      checked={
-                                        webSearchSettings.externalWebAccess !==
-                                        false
-                                      }
-                                      onChange={e =>
-                                        updateCustomSetting(
-                                          'webSearch',
-                                          'externalWebAccess',
-                                          e.target.checked
-                                        )
-                                      }
-                                    />
-                                  }
-                                  label={trans.__('Use External Web Access')}
-                                />
-                              </>
-                            )}
-
-                            {webSearchImplementation === 'anthropic' && (
-                              <>
-                                <TextField
-                                  fullWidth
-                                  label={trans.__('Web Search Max Uses')}
-                                  type="number"
-                                  value={webSearchSettings.maxUses ?? ''}
-                                  onChange={e =>
-                                    updateCustomSetting(
-                                      'webSearch',
-                                      'maxUses',
-                                      e.target.value
-                                        ? Number(e.target.value)
-                                        : undefined
-                                    )
-                                  }
-                                  slotProps={{ htmlInput: { min: 1 } }}
-                                />
-                                {renderDomainList(
-                                  'webSearch.blockedDomains',
-                                  trans.__('Blocked Domains'),
-                                  trans.__('spam.example.com'),
-                                  webSearchSettings.blockedDomains
-                                )}
-                              </>
-                            )}
-                          </Box>
-                        )}
-                      </>
-                    )}
-
-                    {supportsWebFetch && (
-                      <>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={webFetchSettings.enabled === true}
-                              onChange={e =>
-                                updateCustomSetting(
-                                  'webFetch',
-                                  'enabled',
-                                  e.target.checked
-                                )
-                              }
-                            />
-                          }
-                          label={trans.__('Enable Web Fetch')}
-                        />
-
-                        {webFetchSettings.enabled === true && (
-                          <Box
-                            sx={{
-                              pl: 2,
-                              borderLeft: 2,
-                              borderColor: 'divider',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 1.5
-                            }}
-                          >
-                            <TextField
-                              fullWidth
-                              label={trans.__('Web Fetch Max Uses')}
-                              type="number"
-                              value={webFetchSettings.maxUses ?? ''}
-                              onChange={e =>
-                                updateCustomSetting(
-                                  'webFetch',
-                                  'maxUses',
-                                  e.target.value
-                                    ? Number(e.target.value)
-                                    : undefined
-                                )
-                              }
-                              slotProps={{ htmlInput: { min: 1 } }}
-                            />
-                            <TextField
-                              fullWidth
-                              label={trans.__('Web Fetch Max Content Tokens')}
-                              type="number"
-                              value={webFetchSettings.maxContentTokens ?? ''}
-                              onChange={e =>
-                                updateCustomSetting(
-                                  'webFetch',
-                                  'maxContentTokens',
-                                  e.target.value
-                                    ? Number(e.target.value)
-                                    : undefined
-                                )
-                              }
-                              slotProps={{ htmlInput: { min: 1 } }}
-                            />
-                            {renderDomainList(
-                              'webFetch.allowedDomains',
-                              trans.__('Allowed Domains'),
-                              trans.__('docs.example.com'),
-                              webFetchSettings.allowedDomains
-                            )}
-                            {renderDomainList(
-                              'webFetch.blockedDomains',
-                              trans.__('Blocked Domains'),
-                              trans.__('spam.example.com'),
-                              webFetchSettings.blockedDomains
-                            )}
-                            <FormControlLabel
-                              control={
-                                <Switch
-                                  checked={
-                                    webFetchSettings.citationsEnabled === true
-                                  }
-                                  onChange={e =>
-                                    updateCustomSetting(
-                                      'webFetch',
-                                      'citationsEnabled',
-                                      e.target.checked
-                                    )
-                                  }
-                                />
-                              }
-                              label={trans.__('Enable Citations')}
-                            />
-                          </Box>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
               </Box>
             </AccordionDetails>
           </Accordion>

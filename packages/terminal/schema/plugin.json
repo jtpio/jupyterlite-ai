@@ -1,0 +1,14 @@
+{
+  "title": "Jupyternaut Terminal",
+  "description": "Settings of the jupyternaut terminal command.",
+  "type": "object",
+  "properties": {
+    "fullScreen": {
+      "type": "boolean",
+      "title": "Full screen mode",
+      "description": "Run the agent in the alternate screen buffer with its own scrolling, so the prompt stays at the bottom while the transcript scrolls. When disabled, the transcript is printed in the terminal scrollback and the prompt scrolls with it.",
+      "default": true
+    }
+  },
+  "additionalProperties": false
+}

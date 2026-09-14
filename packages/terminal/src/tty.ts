@@ -1,7 +1,5 @@
 import type { IExternalRunContext, Termios } from '@jupyterlite/cockle';
 
-import { type IKey, parseKeys } from './keys';
-
 export interface ISize {
   rows: number;
   columns: number;
@@ -64,18 +62,16 @@ export class Tty {
   }
 
   /**
-   * Decoded keys, as they arrive from the terminal.
+   * Raw input, as it arrives from the terminal.
    */
-  async *keys(): AsyncGenerator<IKey> {
+  async *chunks(): AsyncGenerator<string> {
     for (;;) {
       const chunk = await this._context.stdin.readAsync(null);
       if (!chunk) {
         await new Promise(resolve => setTimeout(resolve, 20));
         continue;
       }
-      for (const key of parseKeys(chunk)) {
-        yield key;
-      }
+      yield chunk;
     }
   }
 

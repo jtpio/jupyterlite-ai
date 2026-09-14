@@ -17,7 +17,10 @@
   "files": [
     "lib/**/*.{d.ts,eot,gif,html,jpg,js,js.map,json,png,svg,woff2,ttf,md}",
     "style/**/*.{css,js,eot,gif,html,jpg,json,png,svg,woff2,ttf}",
-    "src/**/*.{ts,tsx}"
+    "src/**/*.{ts,tsx}",
+    "schema/*.json",
+    "shims/*.js",
+    "webpack.config.js"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -43,6 +46,7 @@
     "watch:labextension": "jupyter-builder watch ."
   },
   "dependencies": {
+    "@earendil-works/pi-tui": "^0.85.1",
     "@jupyterlab/application": "^4.5.8",
     "@jupyterlab/coreutils": "^6.5.8",
     "@jupyterlab/services": "^7.5.8",
@@ -51,9 +55,7 @@
     "@jupyternaut/agent": "^0.19.0",
     "@lumino/commands": "^2.3.2",
     "@lumino/coreutils": "^2.2.1",
-    "@lumino/signaling": "^2.1.4",
-    "ai": "^7.0.59",
-    "zod": "^4.3.6"
+    "@lumino/signaling": "^2.1.4"
   },
   "devDependencies": {
     "@jupyter/builder": "^1.2.2",
@@ -82,6 +84,8 @@
         "bundled": false,
         "singleton": true
       }
-    }
+    },
+    "schemaDir": "schema",
+    "webpackConfig": "./webpack.config.js"
   }
 }

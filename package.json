@@ -55,6 +55,7 @@
       "demo",
       ".venv",
       "webpack.config.js",
+      "shims",
       "python/jupyterlite-ai/jupyterlite_ai",
       "python/jupyternaut-persona/jupyternaut_persona",
       "**/style/index.js",

@@ -29,8 +29,6 @@ import {
   IPersonaRegistry
 } from '@jupyternaut/persona';
 
-import type { ModelMessage } from 'ai';
-
 import { UUID } from '@lumino/coreutils';
 
 import { Debouncer } from '@lumino/polling';
@@ -580,18 +578,10 @@ export class AIChatModel extends AbstractChatModel implements IAIChatModel {
       .filter(msg => msg.body !== '')
       .map(msg => `${msg.sender.bot ? 'assistant' : 'user'}: ${msg.body}`)
       .join('\n');
-    const messages: ModelMessage[] = [
-      {
-        role: 'system',
-        content:
-          "Generate a concise title (no more than 10 words) for the following conversation. Do not use formatting, quotes, or punctuation. Focus on the subject matter and specific content the user is working on, not on the actions taken (e.g. prefer 'Pandas DataFrame filtering' over 'Opening a notebook'). The title should be a noun phrase describing the topic."
-      },
-      {
-        role: 'user',
-        content: history
-      }
-    ];
-    return this.agentManager!.textResponse(messages);
+    return this.agentManager!.textResponse(
+      history,
+      "Generate a concise title (no more than 10 words) for the following conversation. Do not use formatting, quotes, or punctuation. Focus on the subject matter and specific content the user is working on, not on the actions taken (e.g. prefer 'Pandas DataFrame filtering' over 'Opening a notebook'). The title should be a noun phrase describing the topic."
+    );
   }
 
   /**

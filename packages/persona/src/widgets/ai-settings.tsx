@@ -589,22 +589,11 @@ const AISettingsComponent: React.FC<IAISettingsComponentProps> = ({
                         config.useSameProviderForChatAndCompleter
                           ? isActive
                           : config.activeCompleterProvider === provider.id;
-                      const providerInfo = providerRegistry.getProviderInfo(
-                        provider.provider
-                      );
-                      const providerToolCapabilities =
-                        providerInfo?.providerToolCapabilities;
                       const params = provider.parameters;
                       const effectiveContextWindow = getEffectiveContextWindow(
                         provider,
                         providerRegistry
                       );
-                      const webSearchEnabled =
-                        !!providerToolCapabilities?.webSearch &&
-                        provider.customSettings?.webSearch?.enabled === true;
-                      const webFetchEnabled =
-                        !!providerToolCapabilities?.webFetch &&
-                        provider.customSettings?.webFetch?.enabled === true;
 
                       return (
                         <ListItem
@@ -670,9 +659,7 @@ const AISettingsComponent: React.FC<IAISettingsComponentProps> = ({
                               {(params?.temperature !== undefined ||
                                 params?.maxOutputTokens !== undefined ||
                                 params?.maxTurns !== undefined ||
-                                effectiveContextWindow !== undefined ||
-                                webSearchEnabled ||
-                                webFetchEnabled) && (
+                                effectiveContextWindow !== undefined) && (
                                 <Box
                                   sx={{
                                     display: 'flex',
@@ -719,22 +706,6 @@ const AISettingsComponent: React.FC<IAISettingsComponentProps> = ({
                                       )}
                                       size="small"
                                       variant="outlined"
-                                    />
-                                  )}
-                                  {webSearchEnabled && (
-                                    <Chip
-                                      label={trans.__('Web Search')}
-                                      size="small"
-                                      variant="outlined"
-                                      color="info"
-                                    />
-                                  )}
-                                  {webFetchEnabled && (
-                                    <Chip
-                                      label={trans.__('Web Fetch')}
-                                      size="small"
-                                      variant="outlined"
-                                      color="info"
                                     />
                                   )}
                                 </Box>

@@ -2,6 +2,7 @@ import type {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import type { IExternalRunContext } from '@jupyterlite/cockle';
 import { ILiteTerminalAPIClient } from '@jupyterlite/terminal';
 import {
@@ -15,20 +16,51 @@ import { TerminalSessionManager } from './session';
 
 const COMMAND_NAME = 'jupyternaut';
 const COMMAND_ALIAS = 'ai';
+const TERMINAL_SETTINGS = '@jupyterlab/terminal-extension:plugin';
 const PLUGIN_ID = '@jupyternaut/terminal:plugin';
 
 /**
- * Whether the terminal renders on a dark background, from the theme of the
- * terminal widgets and, when they inherit, the JupyterLab theme.
+ * Whether the terminal renders on a dark background, from the terminal theme
+ * setting and, when it inherits, the JupyterLab theme.
  */
-function isDarkMode(): boolean {
-  const theme = document
-    .querySelector('.jp-Terminal')
-    ?.getAttribute('data-term-theme');
-  if (theme === 'dark' || theme === 'light') {
-    return theme === 'dark';
-  }
-  return document.body.dataset.jpThemeLight === 'false';
+function createDarkModeDetector(
+  settingRegistry: ISettingRegistry | null
+): () => boolean {
+  let terminalTheme = 'inherit';
+  settingRegistry
+    ?.load(TERMINAL_SETTINGS)
+    .then(settings => {
+      terminalTheme = String(settings.composite.theme ?? 'inherit');
+      settings.changed.connect(() => {
+        terminalTheme = String(settings.composite.theme ?? 'inherit');
+      });
+    })
+    .catch(() => undefined);
+  return () => {
+    if (terminalTheme === 'dark' || terminalTheme === 'light') {
+      return terminalTheme === 'dark';
+    }
+    return document.body.dataset.jpThemeLight === 'false';
+  };
+}
+
+/**
+ * Whether the command runs in full screen mode, from this plugin's settings.
+ */
+function createFullScreenDetector(
+  settingRegistry: ISettingRegistry | null
+): () => boolean {
+  let fullScreen = true;
+  settingRegistry
+    ?.load(PLUGIN_ID)
+    .then(settings => {
+      fullScreen = settings.composite.fullScreen !== false;
+      settings.changed.connect(() => {
+        fullScreen = settings.composite.fullScreen !== false;
+      });
+    })
+    .catch(() => undefined);
+  return () => fullScreen;
 }
 
 /**
@@ -40,14 +72,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
     'Jupyternaut coding agent as a command in the JupyterLite terminal',
   autoStart: true,
   requires: [ILiteTerminalAPIClient, IAgentManagerFactory, IAISettingsModel],
-  optional: [IProviderRegistry, IToolRegistry],
+  optional: [IProviderRegistry, IToolRegistry, ISettingRegistry],
   activate: (
     app: JupyterFrontEnd,
     client: ILiteTerminalAPIClient,
     agentFactory: IAgentManagerFactory,
     settingsModel: IAISettingsModel,
     providerRegistry: IProviderRegistry | null,
-    toolRegistry: IToolRegistry | null
+    toolRegistry: IToolRegistry | null,
+    settingRegistry: ISettingRegistry | null
   ): void => {
     const sessions = new TerminalSessionManager({
       app,
@@ -55,7 +88,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       settingsModel,
       providerRegistry: providerRegistry ?? undefined,
       toolRegistry: toolRegistry ?? undefined,
-      isDarkMode
+      isDarkMode: createDarkModeDetector(settingRegistry),
+      isFullScreen: createFullScreenDetector(settingRegistry)
     });
     client.registerExternalCommand({
       name: COMMAND_NAME,

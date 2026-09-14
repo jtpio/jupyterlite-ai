@@ -1,10 +1,8 @@
 import type { Contents } from '@jupyterlab/services';
-import type { ITool } from '@jupyternaut/agent';
+import { type ITool, jsonTool, Type } from '@jupyternaut/agent';
 import type { CommandRegistry } from '@lumino/commands';
-import { tool } from 'ai';
-import { z } from 'zod';
 
-import { stripAnsi } from './render/ansi';
+import { stripTerminalSequences } from '@earendil-works/pi-tui';
 
 /**
  * Where cockle mounts the JupyterLite contents.
@@ -135,7 +133,7 @@ export class ShellRunner {
       // The exec plugin refuses to reuse a shell whose command timed out.
       await this._discardShell();
     }
-    return { ...result, output: stripAnsi(result.output ?? '') };
+    return { ...result, output: stripTerminalSequences(result.output ?? '') };
   }
 
   async dispose(): Promise<void> {
@@ -283,30 +281,24 @@ export function createTerminalTools(
 ): Record<string, ITool> {
   const { contents, shell } = options;
 
-  const shellTool = tool({
-    metadata: { title: 'Shell' },
+  const shellTool = jsonTool({
+    name: 'shell',
+    label: 'Shell',
     description:
       'Run a command line in the in-browser cockle shell that shares the file system of the terminal. ' +
       'The working directory persists between calls. Runs as a single pipeline: pipes (|), sequential separators (;) and file redirections (>, >>, 2>, <) are supported. ' +
       'Not supported: && and ||, command substitution ($(...) or backticks), $VAR expansion, 2>&1, python or node. ' +
       'Available commands include the coreutils (ls, cat, head, tail, wc, mkdir, cp, mv, rm, touch, sort, uniq, tr, cut, seq, date, stat...), grep, sed, tree and git; run "cockle-config command" to list them all.',
-    inputSchema: z.object({
-      command: z.string().describe('The command line to run'),
-      timeout: z
-        .number()
-        .optional()
-        .describe(
-          `Maximum time to wait in milliseconds (default ${DEFAULT_SHELL_TIMEOUT_MS})`
-        )
+    parameters: Type.Object({
+      command: Type.String({ description: 'The command line to run' }),
+      timeout: Type.Optional(
+        Type.Number({
+          description: `Maximum time to wait in milliseconds (default ${DEFAULT_SHELL_TIMEOUT_MS})`
+        })
+      )
     }),
     needsApproval: () => options.needsApproval('shell'),
-    execute: async ({
-      command,
-      timeout
-    }: {
-      command: string;
-      timeout?: number;
-    }) => {
+    execute: async ({ command, timeout }) => {
       try {
         const result = await shell.run(
           command,
@@ -326,30 +318,24 @@ export function createTerminalTools(
     }
   });
 
-  const readFileTool = tool({
-    metadata: { title: 'Read File' },
+  const readFileTool = jsonTool({
+    name: 'read_file',
+    label: 'Read File',
     description:
       'Read a text file. Returns the lines prefixed with their 1-based line number. ' +
       'Paths are absolute (the JupyterLite files live under /drive) or relative to the working directory. Notebooks are returned as JSON.',
-    inputSchema: z.object({
-      path: z.string().describe('Path of the file to read'),
-      offset: z.number().optional().describe('0-based line to start from'),
-      limit: z
-        .number()
-        .optional()
-        .describe(
-          `Maximum number of lines to return (default ${MAX_READ_LINES})`
-        )
+    parameters: Type.Object({
+      path: Type.String({ description: 'Path of the file to read' }),
+      offset: Type.Optional(
+        Type.Number({ description: '0-based line to start from' })
+      ),
+      limit: Type.Optional(
+        Type.Number({
+          description: `Maximum number of lines to return (default ${MAX_READ_LINES})`
+        })
+      )
     }),
-    execute: async ({
-      path,
-      offset,
-      limit
-    }: {
-      path: string;
-      offset?: number;
-      limit?: number;
-    }) => {
+    execute: async ({ path, offset, limit }) => {
       const absolutePath = resolvePath(path, options.cwd());
       const contentsPath = toContentsPath(absolutePath);
       let text: string;
@@ -374,16 +360,17 @@ export function createTerminalTools(
     }
   });
 
-  const writeFileTool = tool({
-    metadata: { title: 'Write File' },
+  const writeFileTool = jsonTool({
+    name: 'write_file',
+    label: 'Write File',
     description:
       'Create or overwrite a file under /drive with the given content. Parent directories are created as needed. Notebooks (.ipynb) must be valid JSON.',
-    inputSchema: z.object({
-      path: z.string().describe('Path of the file to write'),
-      content: z.string().describe('The full content of the file')
+    parameters: Type.Object({
+      path: Type.String({ description: 'Path of the file to write' }),
+      content: Type.String({ description: 'The full content of the file' })
     }),
     needsApproval: () => options.needsApproval('write_file'),
-    execute: async ({ path, content }: { path: string; content: string }) => {
+    execute: async ({ path, content }) => {
       const absolutePath = resolvePath(path, options.cwd());
       const contentsPath = toContentsPath(absolutePath);
       if (contentsPath === null || contentsPath === '') {
@@ -404,31 +391,23 @@ export function createTerminalTools(
     }
   });
 
-  const editFileTool = tool({
-    metadata: { title: 'Edit File' },
+  const editFileTool = jsonTool({
+    name: 'edit_file',
+    label: 'Edit File',
     description:
       'Replace an exact string in a file under /drive. The old string must match exactly once unless replace_all is true. Read the file first to get the exact text.',
-    inputSchema: z.object({
-      path: z.string().describe('Path of the file to edit'),
-      old_string: z.string().describe('The exact text to replace'),
-      new_string: z.string().describe('The replacement text'),
-      replace_all: z
-        .boolean()
-        .optional()
-        .describe('Replace every occurrence (default false)')
+    parameters: Type.Object({
+      path: Type.String({ description: 'Path of the file to edit' }),
+      old_string: Type.String({ description: 'The exact text to replace' }),
+      new_string: Type.String({ description: 'The replacement text' }),
+      replace_all: Type.Optional(
+        Type.Boolean({
+          description: 'Replace every occurrence (default false)'
+        })
+      )
     }),
     needsApproval: () => options.needsApproval('edit_file'),
-    execute: async ({
-      path,
-      old_string,
-      new_string,
-      replace_all
-    }: {
-      path: string;
-      old_string: string;
-      new_string: string;
-      replace_all?: boolean;
-    }) => {
+    execute: async ({ path, old_string, new_string, replace_all }) => {
       const absolutePath = resolvePath(path, options.cwd());
       const contentsPath = toContentsPath(absolutePath);
       if (contentsPath === null || contentsPath === '') {
@@ -476,17 +455,19 @@ export function createTerminalTools(
     }
   });
 
-  const listFilesTool = tool({
-    metadata: { title: 'List Files' },
+  const listFilesTool = jsonTool({
+    name: 'list_files',
+    label: 'List Files',
     description:
       'List the entries of a directory (name, type, size). Defaults to the working directory.',
-    inputSchema: z.object({
-      path: z
-        .string()
-        .optional()
-        .describe('Directory to list (default: the working directory)')
+    parameters: Type.Object({
+      path: Type.Optional(
+        Type.String({
+          description: 'Directory to list (default: the working directory)'
+        })
+      )
     }),
-    execute: async ({ path }: { path?: string }) => {
+    execute: async ({ path }) => {
       const absolutePath = resolvePath(path ?? '.', options.cwd());
       const contentsPath = toContentsPath(absolutePath);
       if (contentsPath === null) {

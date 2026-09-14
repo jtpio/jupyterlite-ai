@@ -1,9 +1,18 @@
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { VDomRenderer } from '@jupyterlab/apputils';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
+import type {
+  Api,
+  ImageContent,
+  Model,
+  Models,
+  Provider,
+  TextContent
+} from '@earendil-works/pi-ai';
+import type { TSchema } from '@earendil-works/pi-ai';
 import { Token } from '@lumino/coreutils';
 import type { IDisposable } from '@lumino/disposable';
 import { ISignal } from '@lumino/signaling';
-import type { Tool, LanguageModel, UserContent, ModelMessage } from 'ai';
 import { ISecretsManager } from 'jupyter-secrets-manager';
 
 import type { IModelOptions } from './providers/models';
@@ -16,9 +25,17 @@ import type {
 
 /* THE TOOL REGISTRY */
 /**
- * Type definition for a tool
+ * The content of a user message: text, or text and images.
  */
-export type ITool = Tool;
+export type UserContent = string | (TextContent | ImageContent)[];
+
+/**
+ * A tool of the agent: a pi tool, plus whether it asks for a confirmation
+ * before it runs.
+ */
+export interface ITool<T extends TSchema = TSchema> extends AgentTool<T> {
+  needsApproval?: boolean | ((args: unknown) => boolean | Promise<boolean>);
+}
 
 /**
  * A map containing tools.
@@ -130,56 +147,6 @@ export const ISkillRegistry = new Token<ISkillRegistry>(
 /* THE LLM PROVIDER REGISTRY */
 
 /**
- * Interface for a provider factory function that creates language models
- */
-export interface IProviderFactory {
-  (options: IModelOptions): LanguageModel;
-}
-
-/**
- * Built-in web search integration families supported by provider tools.
- */
-export type IProviderWebSearchImplementation = 'openai' | 'anthropic';
-
-/**
- * Built-in web fetch integration families supported by provider tools.
- */
-export type IProviderWebFetchImplementation = 'anthropic';
-
-/**
- * Capability descriptor for provider-hosted web search.
- */
-export interface IProviderWebSearchCapability {
-  /**
-   * Which built-in integration family to use.
-   */
-  implementation: IProviderWebSearchImplementation;
-
-  /**
-   * If true, skip provider-hosted web search when function tools are enabled.
-   */
-  requiresNoFunctionTools?: boolean;
-}
-
-/**
- * Capability descriptor for provider-hosted web fetch.
- */
-export interface IProviderWebFetchCapability {
-  /**
-   * Which built-in integration family to use.
-   */
-  implementation: IProviderWebFetchImplementation;
-}
-
-/**
- * Provider-hosted tool capabilities exposed by a provider.
- */
-export interface IProviderToolCapabilities {
-  webSearch?: IProviderWebSearchCapability;
-  webFetch?: IProviderWebFetchCapability;
-}
-
-/**
  * Provider information
  */
 export interface IProviderModelInfo {
@@ -256,19 +223,14 @@ export interface IProviderInfo {
   baseUrls?: { url: string; description?: string }[];
 
   /**
-   * Optional provider-hosted tool capabilities for web retrieval.
+   * The pi-ai provider: its API adapters, model catalog and auth.
    */
-  providerToolCapabilities?: IProviderToolCapabilities;
+  provider: Provider;
 
   /**
-   * Optional provider-specific options to apply to cacheable prompts and tools.
+   * The API of the models that are not in the catalog of the provider.
    */
-  cacheProviderOptions?: NonNullable<ModelMessage['providerOptions']>;
-
-  /**
-   * Factory function for creating language models
-   */
-  factory: IProviderFactory;
+  api: Api;
 }
 
 /**
@@ -286,6 +248,11 @@ export interface IProviderRegistry {
   readonly providersChanged: ISignal<IProviderRegistry, void>;
 
   /**
+   * The pi-ai models collection with every registered provider.
+   */
+  readonly models: Models;
+
+  /**
    * Register a new provider.
    */
   registerProvider(info: IProviderInfo): void;
@@ -296,17 +263,10 @@ export interface IProviderRegistry {
   getProviderInfo(id: string): IProviderInfo | null;
 
   /**
-   * Create a chat model instance for the given provider.
+   * The pi-ai model of a provider configuration, or null when the provider
+   * is unknown.
    */
-  createChatModel(id: string, options: IModelOptions): LanguageModel | null;
-
-  /**
-   * Create a completion model instance for the given provider.
-   */
-  createCompletionModel(
-    id: string,
-    options: IModelOptions
-  ): LanguageModel | null;
+  createModel(options: IModelOptions): Model<Api> | null;
 
   /**
    * Get all available provider IDs.
@@ -342,7 +302,6 @@ export interface IProviderConfig {
   baseURL?: string;
   headers?: Record<string, string>;
   parameters?: IProviderParameters;
-  customSettings?: Record<string, any>;
   [key: string]: any; // Index signature for settings compatibility
 }
 
@@ -410,6 +369,14 @@ export const IAISettingsModel = new Token<IAISettingsModel>(
 /* THE AGENT MANAGER */
 
 /**
+ * A message of a restored conversation.
+ */
+export interface IHistoryMessage {
+  role: 'user' | 'assistant';
+  content: UserContent;
+}
+
+/**
  * A namespace for agent manager.
  */
 export namespace IAgentManager {
@@ -428,7 +395,7 @@ export namespace IAgentManager {
     toolRegistry?: IToolRegistry;
 
     /**
-     * Optional provider registry for model creation
+     * The provider registry, for the models; the factory fills it in.
      */
     providerRegistry?: IProviderRegistry;
 
@@ -564,10 +531,9 @@ export interface IAgentManager {
    */
   clearHistory(): Promise<void>;
   /**
-   * Sets the history from already-processed model messages.
-   * @param messages Pre-built model messages (may include binary content)
+   * Replace the conversation history.
    */
-  setHistory(messages: ModelMessage[]): void;
+  setHistory(messages: IHistoryMessage[]): void;
   /**
    * Stops the current streaming response by aborting the request.
    */
@@ -591,10 +557,9 @@ export interface IAgentManager {
    */
   generateResponse(message: UserContent): Promise<void>;
   /**
-   * Create a transient language model to request a text response, which won't be added to history.
-   * @param messages - the messages sequence to send to the model.
+   * Request a one-off text response, which won't be added to history.
    */
-  textResponse(messages: ModelMessage[]): Promise<string>;
+  textResponse(prompt: string, systemPrompt?: string): Promise<string>;
   /**
    * Initializes the AI agent with current settings and tools.
    * Sets up the agent with model configuration, tools, and MCP tools.

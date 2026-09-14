@@ -1,6 +1,8 @@
 # @jupyternaut/agent
 
-AI agent implementation for Jupyter using AI SDK.
+AI agent implementation for Jupyter, built on the [pi](https://pi.dev) agent
+loop (`@earendil-works/pi-agent-core`) and its model providers
+(`@earendil-works/pi-ai`).
 
 This package provides the core agent functionality including:
 

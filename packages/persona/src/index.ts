@@ -315,6 +315,7 @@ const agentManagerFactory: JupyterFrontEndPlugin<IAgentManagerFactory> =
       ): IAgentManagerFactory => {
         const agentManagerFactory = new AgentManagerFactory({
           settingsModel,
+          providerRegistry,
           skillRegistry,
           mcpManager,
           secretsManager,

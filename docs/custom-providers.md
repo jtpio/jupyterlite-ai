@@ -2,7 +2,7 @@
 
 `jupyterlite-ai` supports custom AI providers through its provider registry system. Third-party providers can be registered programmatically in a JupyterLab extension.
 
-Providers are based on the [AI SDK](https://ai-sdk.dev/), which provides a unified interface for working with different AI models.
+Providers are [pi-ai](https://pi.dev) providers (`@earendil-works/pi-ai`): a provider owns its API adapter, its model catalog and its auth. The agent runs on `@earendil-works/pi-agent-core`, so anything pi-ai can talk to can be registered.
 
 ## Registering a Custom Provider
 
@@ -14,17 +14,18 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 import { IProviderRegistry } from '@jupyterlite/ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { createProvider } from '@earendil-works/pi-ai';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'my-extension:custom-provider',
   autoStart: true,
   requires: [IProviderRegistry],
   activate: (app: JupyterFrontEnd, registry: IProviderRegistry) => {
-    const providerInfo = {
+    registry.registerProvider({
       id: 'my-custom-provider',
       name: 'My Custom Provider',
-      apiKeyRequirement: 'required' as const,
+      apiKeyRequirement: 'required',
       defaultModels: ['my-model'],
       modelInfo: {
         'my-model': {
@@ -32,20 +33,22 @@ const plugin: JupyterFrontEndPlugin<void> = {
         }
       },
       supportsBaseURL: true,
-      factory: (options: {
-        apiKey: string;
-        baseURL?: string;
-        model?: string;
-      }) => {
-        const provider = createOpenAI({
-          apiKey: options.apiKey,
-          baseURL: options.baseURL || 'https://api.example.com/v1'
-        });
-        return provider(options.model || 'my-model');
-      }
-    };
-
-    registry.registerProvider(providerInfo);
+      supportsHeaders: true,
+      provider: createProvider({
+        id: 'my-custom-provider',
+        name: 'My Custom Provider',
+        baseUrl: 'https://api.example.com/v1',
+        auth: {
+          apiKey: {
+            name: 'My Custom Provider API key',
+            resolve: async () => ({ auth: {} })
+          }
+        },
+        models: [],
+        api: openAICompletionsApi()
+      }),
+      api: 'openai-completions'
+    });
   }
 };
 ```
@@ -58,10 +61,25 @@ The provider configuration object requires the following properties:
 - `defaultModels`: Array of model names to show in the settings
 - `modelInfo` (optional): Per-model metadata such as `contextWindow`
 - `supportsBaseURL`: Whether the provider supports a custom base URL
-- `cacheProviderOptions` (optional): Provider-specific options applied to the
-  cacheable prompt message and tool definitions, for providers that support
-  prompt caching
-- `factory`: Function that creates and returns a language model (the registry automatically wraps it for chat usage)
+- `supportsHeaders`: Whether the provider supports custom HTTP headers
+- `provider`: The pi-ai `Provider` (from `createProvider()` or one of the pi-ai provider factories such as `openaiProvider()`)
+- `api`: The pi-ai API of the models that are not in the catalog of the provider (for example `'openai-completions'`, `'openai-responses'`, `'anthropic-messages'`)
+
+The API key entered in the settings UI (or stored in the secrets manager) is
+passed to the provider with every request, so the `auth` of the provider only
+needs to say that the provider is configured.
+
+## Models
+
+The registry builds the pi-ai `Model` for a configured provider with
+`IProviderRegistry.createModel()`: it uses the catalog entry of the provider
+when the model id is known, and describes the model from `modelInfo` otherwise.
+The base URL and the headers configured in the UI override the ones of the
+provider.
+
+Extensions can also run their own requests with the pi-ai `Models` collection
+of the registry (`IProviderRegistry.models`), for example
+`models.completeSimple(model, context, { apiKey })`.
 
 ## Hiding the Built-In Settings UI
 
@@ -78,63 +96,27 @@ For example, in your `jupyter-config-data` or `page_config.json`:
 }
 ```
 
-### Example: Using a custom fetch function
+## Custom Tools
 
-You can provide a custom `fetch` function to the provider, which is useful for adding custom headers, handling authentication, or routing requests through a proxy:
+Tools are pi `AgentTool`s with a [TypeBox](https://github.com/sinclairzx81/typebox)
+parameter schema. The `jsonTool()` helper of `@jupyternaut/agent` builds one
+whose result is serialized as JSON:
 
 ```typescript
-factory: (options: { apiKey: string; baseURL?: string; model?: string }) => {
-  const provider = createOpenAI({
-    apiKey: options.apiKey,
-    baseURL: options.baseURL || 'https://api.example.com/v1',
-    fetch: async (url, init) => {
-      // Custom fetch implementation
-      const modifiedInit = {
-        ...init,
-        headers: {
-          ...init?.headers,
-          'X-Custom-Header': 'custom-value'
-        }
-      };
-      return fetch(url, modifiedInit);
-    }
-  });
-  return provider(options.model || 'my-model');
-};
+import { jsonTool, Type } from '@jupyternaut/agent';
+
+const tool = jsonTool({
+  name: 'get_time',
+  label: 'Get time',
+  description: 'Get the current time.',
+  parameters: Type.Object({
+    timezone: Type.Optional(Type.String({ description: 'IANA timezone' }))
+  }),
+  execute: async ({ timezone }) => ({
+    now: new Date().toLocaleString('en-US', { timeZone: timezone })
+  })
+});
 ```
 
-## Provider-Specific Tools
-
-When you add a provider that is not built in, you may also want to expose tools
-that are specific to that provider.
-
-In AI SDK terms, this can be either:
-
-- **Provider-defined tools** (declared as provider tools in AI SDK), or
-- **Provider-executed tools** (tool helpers exposed directly by provider SDKs).
-
-In `jupyterlite-ai`, provider-hosted web tools are wired through
-`IProviderInfo.providerToolCapabilities`. This means custom providers can opt in
-without relying on hardcoded provider IDs.
-
-If you want to support provider-specific tools in your extension:
-
-1. Register your provider with `IProviderRegistry` (as shown above).
-2. Define `providerToolCapabilities` on your `IProviderInfo` entry.
-3. Decide how users enable them (for example, `customSettings` UI toggles).
-4. Add runtime mapping for new capability implementations if needed.
-5. Document provider-specific constraints.
-
-Examples of provider-specific capabilities in AI SDK provider docs include web
-search/fetch, file search, URL context retrieval, code execution, and image
-generation depending on the provider.
-
-References:
-
-- AI SDK tools overview: <https://ai-sdk.dev/docs/foundations/tools>
-- AI SDK provider-defined tool reference: <https://ai-sdk.dev/docs/reference/ai-sdk-core/tool>
-- OpenAI provider docs: <https://ai-sdk.dev/providers/ai-sdk-providers/openai>
-- Anthropic provider docs: <https://ai-sdk.dev/providers/ai-sdk-providers/anthropic>
-
-For end-user web retrieval behavior and setup details, see
-[Web Retrieval](./web-retrieval.md).
+Set `needsApproval` to `true` (or to a predicate on the arguments) to ask the
+user before the tool runs.

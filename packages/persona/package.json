@@ -66,7 +66,6 @@
     "@lumino/signaling": "^2.1.4",
     "@mui/icons-material": "^7",
     "@mui/material": "^7",
-    "ai": "^7.0.59",
     "jupyter-mcp-manager": "^0.2.0",
     "jupyter-secrets-manager": "^0.5.0",
     "react": "^18.3.1"
@@ -96,6 +95,7 @@
     "extension": true,
     "outputDir": "../../python/jupyternaut-persona/jupyternaut_persona/labextension",
     "schemaDir": "schema",
+    "webpackConfig": "./webpack.config.js",
     "sharedPackages": {
       "@emotion/react": {
         "bundled": true,

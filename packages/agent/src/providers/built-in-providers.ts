@@ -1,12 +1,19 @@
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createMistral } from '@ai-sdk/mistral';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createProvider } from '@earendil-works/pi-ai';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
+import { anthropicProvider as piAnthropic } from '@earendil-works/pi-ai/providers/anthropic';
+import { googleProvider as piGoogle } from '@earendil-works/pi-ai/providers/google';
+import { mistralProvider as piMistral } from '@earendil-works/pi-ai/providers/mistral';
+import { openaiProvider as piOpenai } from '@earendil-works/pi-ai/providers/openai';
 
 import { BUILT_IN_PROVIDER_MODEL_INFO } from './generated-model-info';
-import type { IModelOptions } from './models';
 import type { IProviderInfo } from '../tokens';
+
+/**
+ * Auth of providers whose key comes with every request, or that need none.
+ */
+const keylessAuth = (name: string) => ({
+  apiKey: { name, resolve: async () => ({ auth: {} }) }
+});
 
 /**
  * Anthropic provider
@@ -34,28 +41,8 @@ export const anthropicProvider: IProviderInfo = {
   modelInfo: BUILT_IN_PROVIDER_MODEL_INFO.anthropic,
   supportsBaseURL: true,
   supportsHeaders: true,
-  providerToolCapabilities: {
-    webSearch: { implementation: 'anthropic' },
-    webFetch: { implementation: 'anthropic' }
-  },
-  cacheProviderOptions: {
-    anthropic: { cacheControl: { type: 'ephemeral' } }
-  },
-  factory: (options: IModelOptions) => {
-    if (!options.apiKey) {
-      throw new Error('API key required for Anthropic');
-    }
-    const anthropic = createAnthropic({
-      apiKey: options.apiKey,
-      headers: {
-        'anthropic-dangerous-direct-browser-access': 'true',
-        ...options.headers
-      },
-      ...(options.baseURL && { baseURL: options.baseURL })
-    });
-    const modelName = options.model ?? '';
-    return anthropic(modelName);
-  }
+  provider: piAnthropic(),
+  api: 'anthropic-messages'
 };
 
 /**
@@ -84,17 +71,8 @@ export const googleProvider: IProviderInfo = {
   ],
   modelInfo: BUILT_IN_PROVIDER_MODEL_INFO.google,
   supportsBaseURL: true,
-  factory: (options: IModelOptions) => {
-    if (!options.apiKey) {
-      throw new Error('API key required for Google Generative AI');
-    }
-    const google = createGoogleGenerativeAI({
-      apiKey: options.apiKey,
-      ...(options.baseURL && { baseURL: options.baseURL })
-    });
-    const modelName = options.model || 'gemini-2.5-flash';
-    return google(modelName);
-  }
+  provider: piGoogle(),
+  api: 'google-generative-ai'
 };
 
 /**
@@ -121,17 +99,8 @@ export const mistralProvider: IProviderInfo = {
   ],
   modelInfo: BUILT_IN_PROVIDER_MODEL_INFO.mistral,
   supportsBaseURL: true,
-  factory: (options: IModelOptions) => {
-    if (!options.apiKey) {
-      throw new Error('API key required for Mistral');
-    }
-    const mistral = createMistral({
-      apiKey: options.apiKey,
-      ...(options.baseURL && { baseURL: options.baseURL })
-    });
-    const modelName = options.model || 'mistral-large-latest';
-    return mistral(modelName);
-  }
+  provider: piMistral(),
+  api: 'mistral-conversations'
 };
 
 /**
@@ -192,21 +161,8 @@ export const openaiProvider: IProviderInfo = {
   modelInfo: BUILT_IN_PROVIDER_MODEL_INFO.openai,
   supportsBaseURL: true,
   supportsHeaders: true,
-  providerToolCapabilities: {
-    webSearch: { implementation: 'openai' }
-  },
-  factory: (options: IModelOptions) => {
-    if (!options.apiKey) {
-      throw new Error('API key required for OpenAI');
-    }
-    const openai = createOpenAI({
-      apiKey: options.apiKey,
-      ...(options.baseURL && { baseURL: options.baseURL }),
-      ...(options.headers && { headers: options.headers })
-    });
-    const modelName = options.model || 'gpt-4o';
-    return openai(modelName);
-  }
+  provider: piOpenai(),
+  api: 'openai-responses'
 };
 
 /**
@@ -231,14 +187,12 @@ export const genericProvider: IProviderInfo = {
       description: 'Default for local Ollama server'
     }
   ],
-  factory: (options: IModelOptions) => {
-    const openaiCompatible = createOpenAICompatible({
-      name: options.provider,
-      apiKey: options.apiKey || 'dummy',
-      baseURL: options.baseURL ?? '',
-      ...(options.headers && { headers: options.headers })
-    });
-    const modelName = options.model || 'gpt-4o';
-    return openaiCompatible(modelName);
-  }
+  provider: createProvider({
+    id: 'generic',
+    name: 'Generic (OpenAI-compatible)',
+    auth: keylessAuth('API key'),
+    models: [],
+    api: openAICompletionsApi()
+  }),
+  api: 'openai-completions'
 };
