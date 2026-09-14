@@ -19,17 +19,12 @@ import type {
   IProviderRegistry
 } from '@jupyternaut/agent';
 
-import {
-  modelSupportsAudio,
-  modelSupportsImages,
-  modelSupportsPdf
-} from '@jupyternaut/agent';
+import { modelSupportsImages } from '@jupyternaut/agent';
+import type { IHistoryMessage, UserContent } from '@jupyternaut/agent';
 
 import type { IObservableDisposable } from '@lumino/disposable';
 
 import { ISignal, Signal } from '@lumino/signaling';
-
-import type { ModelMessage, UserContent } from 'ai';
 
 import { processAttachments } from './process-attachments';
 
@@ -250,9 +245,7 @@ export class Persona implements IPersona {
           attachments,
           this._documentManager,
           body,
-          modelSupportsImages(providerConfig, this._providerRegistry),
-          modelSupportsPdf(providerConfig, this._providerRegistry),
-          modelSupportsAudio(providerConfig, this._providerRegistry)
+          modelSupportsImages(providerConfig, this._providerRegistry)
         );
       }
       await this._agent.generateResponse(content);
@@ -292,16 +285,8 @@ export class Persona implements IPersona {
       providerConfig,
       this._providerRegistry
     );
-    const supportsPdf = modelSupportsPdf(
-      providerConfig,
-      this._providerRegistry
-    );
-    const supportsAudio = modelSupportsAudio(
-      providerConfig,
-      this._providerRegistry
-    );
 
-    const modelMessages: ModelMessage[] = [];
+    const messages: IHistoryMessage[] = [];
     for (const msg of this._model.messages) {
       const isAI = msg.sender.bot === true;
       if (!isAI && msg.attachments?.length) {
@@ -309,20 +294,18 @@ export class Persona implements IPersona {
           msg.attachments,
           this._documentManager,
           msg.body,
-          supportsImages,
-          supportsPdf,
-          supportsAudio
+          supportsImages
         );
-        modelMessages.push({ role: 'user', content: enhancedContent });
+        messages.push({ role: 'user', content: enhancedContent });
       } else if (msg.body) {
-        modelMessages.push({
+        messages.push({
           role: isAI ? 'assistant' : 'user',
           content: msg.body
         });
       }
     }
 
-    this._agent.setHistory(modelMessages);
+    this._agent.setHistory(messages);
   }
 
   private _onAgentEvent(

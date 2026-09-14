@@ -1,8 +1,9 @@
+import { Type } from '@earendil-works/pi-ai';
 import { CommandRegistry } from '@lumino/commands';
+import type { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 import { Widget } from '@lumino/widgets';
-import { tool } from 'ai';
-import { z } from 'zod';
 
+import { jsonTool } from './define';
 import type { IAISettingsModel, ITool } from '../tokens';
 
 interface ICommandEntry {
@@ -94,20 +95,23 @@ function searchCommands(
  * Create a tool to discover all available commands and their metadata
  */
 export function createDiscoverCommandsTool(commands: CommandRegistry): ITool {
-  return tool({
-    metadata: { title: 'Discover Commands' },
+  return jsonTool({
+    name: 'discover_commands',
+    label: 'Discover Commands',
     description:
       'Discover all available JupyterLab commands with their metadata, arguments, and descriptions',
-    inputSchema: z.object({
-      query: z
-        .string()
-        .optional()
-        .nullable()
-        .describe(
-          'Optional search query to filter commands. Supports multi-word queries (whitespace-separated) by requiring each word to be contained in the command id, label, caption, or description. Leave empty to list all commands.'
-        )
+    parameters: Type.Object({
+      query: Type.Optional(
+        Type.Union([
+          Type.String({
+            description:
+              'Optional search query to filter commands. Supports multi-word queries (whitespace-separated) by requiring each word to be contained in the command id, label, caption, or description. Leave empty to list all commands.'
+          }),
+          Type.Null()
+        ])
+      )
     }),
-    execute: async (input: { query?: string | null }) => {
+    execute: async input => {
       const { query } = input;
 
       // Build the full command list first.
@@ -143,9 +147,8 @@ export function createDiscoverCommandsTool(commands: CommandRegistry): ITool {
 }
 
 /**
- * Create the approval policy for the execute command tool, to be used with the
- * `toolApproval` option of a `generateText`/`streamText` call or agent.
- * Commands in the settings' commandsRequiringApproval list will need approval.
+ * Create the approval policy for the execute command tool. Commands in the
+ * settings' commandsRequiringApproval list will need approval.
  */
 export function createExecuteCommandApprovalPolicy(
   settingsModel: IAISettingsModel
@@ -165,20 +168,23 @@ export function createExecuteCommandApprovalPolicy(
  * handled at the agent level via `createExecuteCommandApprovalPolicy`.
  */
 export function createExecuteCommandTool(commands: CommandRegistry): ITool {
-  return tool({
-    metadata: { title: 'Execute Command' },
+  return jsonTool({
+    name: 'execute_command',
+    label: 'Execute Command',
     description:
       'Execute a specific JupyterLab command with optional arguments',
-    inputSchema: z.object({
-      commandId: z.string().describe('The ID of the command to execute'),
-      args: z
-        .record(z.string(), z.unknown())
-        .optional()
-        .describe(
-          'Optional arguments object to pass to the command (must be an object, not a string)'
-        )
+    parameters: Type.Object({
+      commandId: Type.String({
+        description: 'The ID of the command to execute'
+      }),
+      args: Type.Optional(
+        Type.Record(Type.String(), Type.Unknown(), {
+          description:
+            'Optional arguments object to pass to the command (must be an object, not a string)'
+        })
+      )
     }),
-    execute: async (input: { commandId: string; args?: any }) => {
+    execute: async input => {
       const { commandId, args } = input;
 
       // Check if command exists
@@ -190,7 +196,10 @@ export function createExecuteCommandTool(commands: CommandRegistry): ITool {
       }
 
       // Execute the command
-      const result = await commands.execute(commandId, args);
+      const result = await commands.execute(
+        commandId,
+        args as ReadonlyPartialJSONObject | undefined
+      );
 
       // Handle actual Lumino widgets specially by extracting id and title.
       // Avoid collapsing plain command results that happen to contain an `id` field.

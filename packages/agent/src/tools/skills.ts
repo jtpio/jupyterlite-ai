@@ -1,24 +1,28 @@
-import { tool } from 'ai';
-import { z } from 'zod';
+import { Type } from '@earendil-works/pi-ai';
 
+import { jsonTool } from './define';
 import type { ISkillRegistry, ITool } from '../tokens';
 
 /**
  * Create a tool to discover available skills and their summaries.
  */
 export function createDiscoverSkillsTool(skillRegistry: ISkillRegistry): ITool {
-  return tool({
-    metadata: { title: 'Discover Skills' },
+  return jsonTool({
+    name: 'discover_skills',
+    label: 'Discover Skills',
     description:
       'Discover available agent skills with their names and descriptions',
-    inputSchema: z.object({
-      query: z
-        .string()
-        .optional()
-        .nullable()
-        .describe('Optional search query to filter skills')
+    parameters: Type.Object({
+      query: Type.Optional(
+        Type.Union([
+          Type.String({
+            description: 'Optional search query to filter skills'
+          }),
+          Type.Null()
+        ])
+      )
     }),
-    execute: async (input: { query?: string | null }) => {
+    execute: async input => {
       const filtered = skillRegistry.listSkills(input.query ?? undefined);
 
       return {
@@ -34,21 +38,24 @@ export function createDiscoverSkillsTool(skillRegistry: ISkillRegistry): ITool {
  * Create a tool to load skill instructions or a bundled resource.
  */
 export function createLoadSkillTool(skillRegistry: ISkillRegistry): ITool {
-  return tool({
-    metadata: { title: 'Load Skill' },
+  return jsonTool({
+    name: 'load_skill',
+    label: 'Load Skill',
     description:
       'Load a skill definition or a specific resource file bundled with a skill',
-    inputSchema: z.object({
-      name: z.string().describe('The name of the skill to load'),
-      resource: z
-        .string()
-        .optional()
-        .nullable()
-        .describe(
-          'Optional resource path to load from the skill (e.g. references/REFERENCE.md)'
-        )
+    parameters: Type.Object({
+      name: Type.String({ description: 'The name of the skill to load' }),
+      resource: Type.Optional(
+        Type.Union([
+          Type.String({
+            description:
+              'Optional resource path to load from the skill (e.g. references/REFERENCE.md)'
+          }),
+          Type.Null()
+        ])
+      )
     }),
-    execute: async (input: { name: string; resource?: string | null }) => {
+    execute: async input => {
       const { name, resource } = input;
 
       if (resource) {

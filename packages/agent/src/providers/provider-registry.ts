@@ -1,8 +1,17 @@
+import {
+  type Api,
+  createModels,
+  type Model,
+  type Models,
+  type MutableModels
+} from '@earendil-works/pi-ai';
 import { ISignal, Signal } from '@lumino/signaling';
-import type { LanguageModel } from 'ai';
 
 import type { IModelOptions } from './models';
 import type { IProviderInfo, IProviderRegistry } from '../tokens';
+
+const DEFAULT_CONTEXT_WINDOW = 128000;
+const DEFAULT_MAX_TOKENS = 16384;
 
 /**
  * Implementation of the provider registry
@@ -22,15 +31,20 @@ export class ProviderRegistry implements IProviderRegistry {
     return this._providersChanged;
   }
 
+  get models(): Models {
+    return this._models;
+  }
+
   /**
    * Register a new provider
-   * @param info Provider information with factories for chat and completion
+   * @param info Provider information with the pi-ai provider
    */
   registerProvider(info: IProviderInfo): void {
     if (info.id in this._providers) {
       throw new Error(`Provider with id "${info.id}" is already registered`);
     }
     this._providers[info.id] = { ...info };
+    this._models.setProvider(info.provider);
     this._providersChanged.emit();
   }
 
@@ -44,36 +58,38 @@ export class ProviderRegistry implements IProviderRegistry {
   }
 
   /**
-   * Create a chat model instance using the specified provider
-   * @param id Provider ID
-   * @param options Model configuration options
-   * @returns Chat model instance or null if creation fails
+   * The pi-ai model of a configuration: the catalog entry of the provider
+   * when there is one, a plain description otherwise.
    */
-  createChatModel(id: string, options: IModelOptions): LanguageModel | null {
-    const provider = this._providers[id];
-    if (!provider) {
+  createModel(options: IModelOptions): Model<Api> | null {
+    const info = this._providers[options.provider];
+    if (!info) {
       return null;
     }
-
-    return provider.factory(options);
-  }
-
-  /**
-   * Create a completion model instance using the specified provider
-   * @param id Provider ID
-   * @param options Model configuration options
-   * @returns Language model instance or null if creation fails
-   */
-  createCompletionModel(
-    id: string,
-    options: IModelOptions
-  ): LanguageModel | null {
-    const provider = this._providers[id];
-    if (!provider) {
-      return null;
+    const id = options.model || info.defaultModels[0] || '';
+    const known = info.provider.getModels().find(model => model.id === id);
+    const model: Model<Api> = known
+      ? { ...known }
+      : {
+          id,
+          name: id,
+          api: info.api,
+          provider: info.id,
+          baseUrl: info.provider.baseUrl ?? '',
+          reasoning: false,
+          input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow:
+            info.modelInfo?.[id]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+          maxTokens: DEFAULT_MAX_TOKENS
+        };
+    if (options.baseURL) {
+      model.baseUrl = options.baseURL;
     }
-
-    return provider.factory(options);
+    if (options.headers) {
+      model.headers = { ...model.headers, ...options.headers };
+    }
+    return model;
   }
 
   /**
@@ -86,4 +102,5 @@ export class ProviderRegistry implements IProviderRegistry {
 
   private _providers: Record<string, IProviderInfo> = {};
   private _providersChanged = new Signal<IProviderRegistry, void>(this);
+  private _models: MutableModels = createModels();
 }

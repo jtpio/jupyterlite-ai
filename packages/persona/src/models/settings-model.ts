@@ -272,8 +272,7 @@ Rules:
       apiKey: providerConfig.apiKey,
       baseURL: providerConfig.baseURL,
       headers: providerConfig.headers,
-      parameters: providerConfig.parameters,
-      customSettings: providerConfig.customSettings
+      parameters: providerConfig.parameters
     };
 
     this._config.providers.push(newProvider);

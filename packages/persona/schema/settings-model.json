@@ -39,18 +39,30 @@
       "items": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "name": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
           "provider": {
             "type": "string",
             "description": "Provider identifier"
           },
-          "model": { "type": "string" },
-          "apiKey": { "type": "string" },
-          "baseURL": { "type": "string" },
+          "model": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "baseURL": {
+            "type": "string"
+          },
           "headers": {
             "type": "object",
-            "additionalProperties": { "type": "string" }
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "parameters": {
             "type": "object",
@@ -89,83 +101,6 @@
                 "description": "Whether to use filter text for completions"
               }
             }
-          },
-          "customSettings": {
-            "type": "object",
-            "description": "Provider-specific advanced settings. Available sections depend on provider capabilities.",
-            "properties": {
-              "webSearch": {
-                "type": "object",
-                "description": "Provider-hosted web search settings.",
-                "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "description": "Enable provider-hosted web search for this provider."
-                  },
-                  "searchContextSize": {
-                    "type": "string",
-                    "enum": ["low", "medium", "high"],
-                    "description": "Web search context size for providers that support it."
-                  },
-                  "externalWebAccess": {
-                    "type": "boolean",
-                    "description": "Use external web access for providers that support it."
-                  },
-                  "allowedDomains": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Allowed domains for web search."
-                  },
-                  "blockedDomains": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Blocked domains for providers that support it."
-                  },
-                  "maxUses": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum number of web searches."
-                  }
-                },
-                "additionalProperties": true
-              },
-              "webFetch": {
-                "type": "object",
-                "description": "Provider-hosted web fetch settings.",
-                "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "description": "Enable provider-hosted web fetch for this provider."
-                  },
-                  "maxUses": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum number of web fetches."
-                  },
-                  "allowedDomains": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Allowed domains for web fetch."
-                  },
-                  "blockedDomains": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Blocked domains for web fetch."
-                  },
-                  "maxContentTokens": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum fetched content tokens."
-                  },
-                  "citationsEnabled": {
-                    "type": "boolean",
-                    "description": "Enable citations in Anthropic web fetch results."
-                  }
-                },
-                "additionalProperties": true
-              }
-            },
-            "additionalProperties": true
           }
         },
         "required": ["id", "name", "provider", "model"],
@@ -212,7 +147,9 @@
       "title": "Commands Requiring Approval",
       "description": "List of commands that require user approval before AI can execute them",
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": [
         "notebook:restart-run-all",
         "notebook:run-cell",
@@ -234,14 +171,18 @@
       "title": "Commands Auto-Rendering MIME Bundles",
       "description": "List of execute_command command IDs whose outputs can auto-render MIME bundles in chat",
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": ["jupyterlab-ai-commands:execute-in-kernel"]
     },
     "trustedMimeTypesForAutoRender": {
       "title": "Trusted MIME Types for Auto-Render",
       "description": "MIME types to mark as trusted when auto-rendering execute_command outputs in chat",
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": ["text/html"]
     },
     "systemPrompt": {
@@ -279,7 +220,9 @@
       "title": "Skills Paths",
       "description": "Paths to directories containing agent skills, relative to the server root. Skills are loaded from all paths; the first occurrence of a skill name takes priority.",
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": [".agents/skills", "_agents/skills"]
     }
   },

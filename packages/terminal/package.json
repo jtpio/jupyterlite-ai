@@ -52,9 +52,7 @@
     "@jupyternaut/agent": "^0.19.0",
     "@lumino/commands": "^2.3.2",
     "@lumino/coreutils": "^2.2.1",
-    "@lumino/signaling": "^2.1.4",
-    "ai": "^7.0.59",
-    "zod": "^4.3.6"
+    "@lumino/signaling": "^2.1.4"
   },
   "devDependencies": {
     "@jupyter/builder": "^1.2.2",

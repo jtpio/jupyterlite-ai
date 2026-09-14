@@ -1,78 +1,43 @@
-import { createMCPClient, type MCPClient } from '@ai-sdk/mcp';
+import {
+  Agent,
+  type AgentEvent,
+  type AgentToolResult,
+  type BeforeToolCallContext,
+  type BeforeToolCallResult
+} from '@earendil-works/pi-agent-core';
+import type { Api, Message, Model, Usage } from '@earendil-works/pi-ai';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { PromiseDelegate } from '@lumino/coreutils';
 import { ISignal, Signal } from '@lumino/signaling';
-import {
-  generateText,
-  ToolLoopAgent,
-  type ModelMessage,
-  type LanguageModel,
-  isStepCount,
-  type SystemModelMessage,
-  type ToolApprovalRequestOutput,
-  type TypedToolError,
-  type TypedToolOutputDenied,
-  type TypedToolResult,
-  type UserContent,
-  type AssistantModelMessage,
-  APICallError
-} from 'ai';
 import { IMcpManager } from 'jupyter-mcp-manager';
 import { ISecretsManager } from 'jupyter-secrets-manager';
 
-import { createModel } from './providers/models';
-import { createExecuteCommandApprovalPolicy } from './tools/commands';
+import { createMcpTools, McpClient } from './mcp';
 import { getEffectiveContextWindow } from './providers/model-info';
-import {
-  createProviderTools,
-  type IProviderCustomSettings
-} from './providers/provider-tools';
 import type { ISkillSummary } from './skills';
+import { createExecuteCommandApprovalPolicy } from './tools/commands';
 import {
   type IAgentManager,
   type IAgentManagerFactory,
   type IAISettingsModel,
-  type IProviderInfo,
+  type IHistoryMessage,
   type IProviderRegistry,
   type ISkillRegistry,
-  type ITool,
-  type IToolRegistry,
   type ITokenUsage,
+  type IToolRegistry,
+  type ITool,
   type ToolMap,
+  type UserContent,
   SECRETS_NAMESPACE
 } from './tokens';
 
 /**
- * Interface for MCP client wrapper to track connection state
+ * A connected MCP server and its tools.
  */
-interface IMCPClientWrapper {
+interface IMcpConnection {
   name: string;
-  client: MCPClient;
-}
-
-/**
- * The stream result type produced by the agent.
- */
-type AgentStreamResult = Awaited<
-  ReturnType<ToolLoopAgent<never, ToolMap>['stream']>
->;
-
-/**
- * Result from processing a stream, including approval info if applicable.
- */
-interface IStreamProcessResult {
-  /**
-   * Whether an approval request was encountered and processed.
-   */
-  approvalProcessed: boolean;
-  /**
-   * Whether the stream was aborted before completion.
-   */
-  aborted: boolean;
-  /**
-   * The approval response message to add to history (if approval was processed).
-   */
-  approvalResponse?: ModelMessage;
+  client: McpClient;
+  tools: ITool[];
 }
 
 /**
@@ -85,6 +50,10 @@ export namespace AgentManagerFactory {
      */
     settingsModel: IAISettingsModel;
     /**
+     * The provider registry, for the models.
+     */
+    providerRegistry: IProviderRegistry;
+    /**
      * The skill registry for discovering skills.
      */
     skillRegistry?: ISkillRegistry;
@@ -96,10 +65,6 @@ export namespace AgentManagerFactory {
      * The secrets manager.
      */
     secretsManager?: ISecretsManager;
-    /**
-     * The provider registry, used to create models for `createModel`.
-     */
-    providerRegistry?: IProviderRegistry;
     /**
      * The token used to request the secrets manager.
      */
@@ -114,11 +79,10 @@ export class AgentManagerFactory implements IAgentManagerFactory {
   constructor(options: AgentManagerFactory.IOptions) {
     Private.setToken(options.token);
     this._settingsModel = options.settingsModel;
+    this._providerRegistry = options.providerRegistry;
     this._skillRegistry = options.skillRegistry;
     this._mcpManager = options.mcpManager;
     this._secretsManager = options.secretsManager;
-    this._providerRegistry = options.providerRegistry;
-    this._mcpClients = [];
     this._mcpConnectionChanged = new Signal<this, boolean>(this);
 
     if (this._skillRegistry) {
@@ -150,6 +114,7 @@ export class AgentManagerFactory implements IAgentManagerFactory {
   createAgent(options: IAgentManager.IOptions): IAgentManager {
     const agentManager = new AgentManager({
       ...options,
+      providerRegistry: options.providerRegistry ?? this._providerRegistry,
       skillRegistry: this._skillRegistry,
       secretsManager: this._secretsManager
     });
@@ -184,19 +149,9 @@ export class AgentManagerFactory implements IAgentManagerFactory {
    * @returns True if the server is connected, false otherwise
    */
   isMCPServerConnected(serverName: string): boolean {
-    return this._mcpClients.some(wrapper => wrapper.name === serverName);
-  }
-
-  /**
-   * Create the language model of a configured provider.
-   */
-  createModel(providerId: string): Promise<LanguageModel> {
-    return Private.createProviderModel({
-      providerId,
-      settingsModel: this._settingsModel,
-      providerRegistry: this._providerRegistry,
-      secretsManager: this._secretsManager
-    });
+    return this._mcpConnections.some(
+      connection => connection.name === serverName
+    );
   }
 
   /**
@@ -204,19 +159,11 @@ export class AgentManagerFactory implements IAgentManagerFactory {
    */
   async getMCPTools(): Promise<ToolMap> {
     const mcpTools: ToolMap = {};
-
-    for (const wrapper of this._mcpClients) {
-      try {
-        const tools = await wrapper.client.tools();
-        Object.assign(mcpTools, tools);
-      } catch (error) {
-        console.warn(
-          `Failed to get tools from MCP server ${wrapper.name}:`,
-          error
-        );
+    for (const connection of this._mcpConnections) {
+      for (const tool of connection.tools) {
+        mcpTools[tool.name] = tool;
       }
     }
-
     return mcpTools;
   }
 
@@ -230,48 +177,34 @@ export class AgentManagerFactory implements IAgentManagerFactory {
   }
 
   /**
-   * Initializes MCP (Model Context Protocol) clients based on current settings.
-   * Closes existing clients and connects to enabled servers from configuration.
+   * Connect the enabled MCP servers of the configuration.
    */
   private async _initializeMCPClients(): Promise<void> {
     const servers = this._mcpManager?.getMCPServers() ?? [];
     let connectionChanged = false;
 
-    // Close existing clients
-    for (const wrapper of this._mcpClients) {
-      try {
-        await wrapper.client.close();
-        connectionChanged = true;
-      } catch (error) {
-        console.warn('Error closing MCP client:', error);
-      }
+    for (const connection of this._mcpConnections) {
+      await connection.client.close();
+      connectionChanged = true;
     }
-    this._mcpClients = [];
+    this._mcpConnections = [];
 
-    for (const serverConfig of servers) {
-      if (serverConfig.type !== 'http') {
+    for (const server of servers) {
+      if (server.type !== 'http') {
         continue;
       }
+      const headers = Object.fromEntries(
+        (server.headers ?? []).map(header => [header.name, header.value])
+      );
       try {
-        const client = await createMCPClient({
-          transport: {
-            type: 'http',
-            url: serverConfig.url,
-            // The transport calls this option as a method (`this.fetchFn(...)`),
-            // so an unbound window.fetch would throw "Illegal invocation" in
-            // browsers.
-            fetch: globalThis.fetch.bind(globalThis)
-          }
-        });
-
-        this._mcpClients.push({
-          name: serverConfig.name,
-          client
-        });
+        const client = new McpClient(server.url, headers);
+        await client.connect();
+        const tools = await createMcpTools(client);
+        this._mcpConnections.push({ name: server.name, client, tools });
         connectionChanged = true;
       } catch (error) {
         console.warn(
-          `Failed to connect to MCP server "${serverConfig.name}" at ${serverConfig.url}:`,
+          `Failed to connect to MCP server "${server.name}" at ${server.url}:`,
           error
         );
       }
@@ -279,7 +212,7 @@ export class AgentManagerFactory implements IAgentManagerFactory {
 
     // Emit connection change signal if there were any changes
     if (connectionChanged) {
-      this._mcpConnectionChanged.emit(this._mcpClients.length > 0);
+      this._mcpConnectionChanged.emit(this._mcpConnections.length > 0);
     }
   }
 
@@ -315,11 +248,11 @@ export class AgentManagerFactory implements IAgentManagerFactory {
 
   private _agentManagers: IAgentManager[] = [];
   private _settingsModel: IAISettingsModel;
+  private _providerRegistry: IProviderRegistry;
   private _skillRegistry?: ISkillRegistry;
   private _secretsManager?: ISecretsManager;
-  private _providerRegistry?: IProviderRegistry;
   private _mcpManager?: IMcpManager;
-  private _mcpClients: IMCPClientWrapper[];
+  private _mcpConnections: IMcpConnection[] = [];
   private _mcpConnectionChanged: Signal<this, boolean>;
   private _initQueue: Promise<void> = Promise.resolve();
 }
@@ -331,11 +264,58 @@ const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_TURNS = 25;
 
 /**
+ * The model of an agent without a configured provider.
+ */
+const NO_MODEL: Model<Api> = {
+  id: '',
+  name: '',
+  api: 'openai-completions',
+  provider: 'none',
+  baseUrl: '',
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128000,
+  maxTokens: 16384
+};
+
+function emptyUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  };
+}
+
+function contentText(content: UserContent): string {
+  return typeof content === 'string'
+    ? content
+    : content
+        .filter(part => part.type === 'text')
+        .map(part => part.text)
+        .join('\n');
+}
+
+export namespace AgentManager {
+  /**
+   * The options of an agent manager: the provider registry is required.
+   */
+  export interface IOptions extends IAgentManager.IOptions {
+    providerRegistry: IProviderRegistry;
+  }
+}
+
+/**
  * Cached configuration used to (re)build the agent.
  */
 interface IAgentConfig {
-  model: LanguageModel;
-  providerInfo?: IProviderInfo | null;
+  model: Model<Api>;
+  /**
+   * The function tools by name: the selected registry tools and the MCP tools.
+   */
   tools: ToolMap;
   temperature: number;
   maxOutputTokens?: number;
@@ -346,26 +326,23 @@ interface IAgentConfig {
 
 /**
  * Manages the AI agent lifecycle and execution loop.
- * Provides agent initialization, tool management, MCP server integration,
- * and handles the complete agent execution cycle.
- * Emits events for UI updates instead of directly manipulating the chat interface.
+ * The loop is the pi agent (`@earendil-works/pi-agent-core`) and the requests
+ * go through the pi-ai models of the provider registry. Emits events for UI
+ * updates instead of directly manipulating the chat interface.
  */
 export class AgentManager implements IAgentManager {
   /**
    * Creates a new AgentManager instance.
    * @param options Configuration options for the agent manager
    */
-  constructor(options: IAgentManager.IOptions) {
+  constructor(options: AgentManager.IOptions) {
     this._settingsModel = options.settingsModel;
     this._toolRegistry = options.toolRegistry;
     this._providerRegistry = options.providerRegistry;
     this._skillRegistry = options.skillRegistry;
     this._secretsManager = options.secretsManager;
     this._selectedToolNames = [];
-    this._agent = null;
-    this._history = [];
     this._mcpTools = {};
-    this._controller = null;
     this._agentEvent = new Signal<this, IAgentManager.IAgentEvent>(this);
     this._tokenUsage = options.tokenUsage ?? {
       inputTokens: 0,
@@ -377,6 +354,27 @@ export class AgentManager implements IAgentManager {
     this._renderMimeRegistry = options.renderMimeRegistry;
     this._additionalInstructions = options.additionalInstructions;
     this._streaming.resolve();
+
+    this._agent = new Agent({
+      initialState: {
+        systemPrompt: '',
+        model: NO_MODEL,
+        thinkingLevel: 'off',
+        tools: []
+      },
+      streamFn: (model, context, streamOptions) =>
+        this._providerRegistry.models.streamSimple(model, context, {
+          ...streamOptions,
+          temperature: this._agentConfig?.temperature,
+          maxTokens: this._agentConfig?.maxOutputTokens
+        }),
+      getApiKey: () => this._apiKey(),
+      beforeToolCall: (context, signal) =>
+        this._beforeToolCall(context, signal),
+      shouldStopAfterTurn: () =>
+        ++this._turns >= (this._agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS)
+    });
+    this._agent.subscribe(event => this._onEvent(event));
 
     this.activeProvider =
       options.activeProvider ?? this._settingsModel.config.defaultProvider;
@@ -416,6 +414,13 @@ export class AgentManager implements IAgentManager {
   }
 
   /**
+   * The pi agent, for its transcript and queues.
+   */
+  get agent(): Agent {
+    return this._agent;
+  }
+
+  /**
    * Refresh the skills snapshot and rebuild the agent if resources are ready.
    */
   refreshSkills(): void {
@@ -426,7 +431,7 @@ export class AgentManager implements IAgentManager {
         if (!this._agentConfig) {
           return;
         }
-        this._rebuildAgent();
+        this._applyAgentConfig();
       });
   }
 
@@ -477,7 +482,7 @@ export class AgentManager implements IAgentManager {
 
     const result: ToolMap = {};
     for (const name of this._selectedToolNames) {
-      const tool: ITool | null = this._toolRegistry.get(name);
+      const tool = this._toolRegistry.get(name);
       if (tool) {
         result[name] = tool;
       }
@@ -503,13 +508,11 @@ export class AgentManager implements IAgentManager {
       return false;
     }
 
-    if (this._providerRegistry) {
-      const providerInfo = this._providerRegistry.getProviderInfo(
-        activeProviderConfig.provider
-      );
-      if (providerInfo?.apiKeyRequirement === 'required') {
-        return !!activeProviderConfig.apiKey;
-      }
+    const providerInfo = this._providerRegistry.getProviderInfo(
+      activeProviderConfig.provider
+    );
+    if (providerInfo?.apiKeyRequirement === 'required') {
+      return !!activeProviderConfig.apiKey;
     }
 
     return true;
@@ -523,9 +526,10 @@ export class AgentManager implements IAgentManager {
     this.stopStreaming('Chat cleared');
 
     await this._streaming.promise;
+    await this._agent.waitForIdle();
+    this._agent.reset();
 
-    // Clear history and token usage
-    this._history = [];
+    // Clear token usage
     this._tokenUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -535,12 +539,18 @@ export class AgentManager implements IAgentManager {
   }
 
   /**
-   * Sets the history from already-processed model messages.
-   * @param messages Pre-built model messages (may include binary content)
+   * Replace the conversation history.
    */
-  setHistory(messages: ModelMessage[]): void {
+  setHistory(messages: IHistoryMessage[]): void {
     this.stopStreaming('Chat history changed');
-    this._history = Private.sanitizeModelMessages(messages);
+    // The aborted run still appends its last message when it settles.
+    this._historyQueue = this._historyQueue
+      .then(() => this._agent.waitForIdle())
+      .then(() => {
+        this._agent.state.messages = messages.map(message =>
+          this._toMessage(message)
+        );
+      });
   }
 
   /**
@@ -549,16 +559,12 @@ export class AgentManager implements IAgentManager {
    */
   stopStreaming(reason?: string): void {
     this._controller?.abort();
+    this._agent.abort();
 
     // Reject any pending approvals
-    for (const [toolCallId, pending] of this._pendingApprovals) {
-      pending.resolve(false, reason ?? 'Stream ended by user');
-      this._agentEvent.emit({
-        type: 'tool_approval_resolved',
-        data: { toolCallId, approved: false }
-      });
+    for (const settle of [...this._pendingApprovals.values()]) {
+      settle(false, reason ?? 'Stream ended by user');
     }
-    this._pendingApprovals.clear();
   }
 
   /**
@@ -567,15 +573,7 @@ export class AgentManager implements IAgentManager {
    * @param reason Optional reason for approval
    */
   approveToolCall(toolCallId: string, reason?: string): void {
-    const pending = this._pendingApprovals.get(toolCallId);
-    if (pending) {
-      pending.resolve(true, reason);
-      this._pendingApprovals.delete(toolCallId);
-      this._agentEvent.emit({
-        type: 'tool_approval_resolved',
-        data: { toolCallId, approved: true }
-      });
-    }
+    this._pendingApprovals.get(toolCallId)?.(true, reason);
   }
 
   /**
@@ -584,198 +582,328 @@ export class AgentManager implements IAgentManager {
    * @param reason Optional reason for rejection
    */
   rejectToolCall(toolCallId: string, reason?: string): void {
-    const pending = this._pendingApprovals.get(toolCallId);
-    if (pending) {
-      pending.resolve(false, reason);
-      this._pendingApprovals.delete(toolCallId);
-      this._agentEvent.emit({
-        type: 'tool_approval_resolved',
-        data: { toolCallId, approved: false }
-      });
-    }
+    this._pendingApprovals.get(toolCallId)?.(false, reason);
   }
 
   /**
    * Generates AI response to user message using the agent.
    * Handles the complete execution cycle including tool calls.
-   * @param message The user message to respond to (may include processed attachment content)
+   * @param message The user message to respond to (text, or text and images)
    */
   async generateResponse(message: UserContent): Promise<void> {
     this._streaming = new PromiseDelegate();
-    this._controller = new AbortController();
-    const responseHistory: ModelMessage[] = [];
-
-    // Add user message to history
-    responseHistory.push({
-      role: 'user',
-      content: message
-    });
-
+    // A stop while the agent gets ready cancels the generation as well.
+    const controller = new AbortController();
+    this._controller = controller;
     try {
-      // Ensure we have an agent
-      if (!this._agent) {
+      if (!this._configured) {
         await this.initializeAgent();
       }
-
-      if (!this._agent) {
+      if (!this._configured) {
         throw new Error(
           'Failed to initialize agent.\nPlease configure your AI settings first. Open the AI Settings to set your API key and model.'
         );
       }
-
-      let continueLoop = true;
-      while (continueLoop) {
-        const result = await this._agent.stream({
-          messages: [...this._history, ...responseHistory],
-          abortSignal: this._controller.signal
-        });
-
-        const streamResult = await this._processStreamResult(result);
-
-        if (streamResult.aborted) {
-          try {
-            const responseMessages = await result.responseMessages;
-            if (responseMessages.length) {
-              this._history.push(
-                ...Private.sanitizeModelMessages(responseMessages)
-              );
-            }
-          } catch {
-            // Aborting before a step finishes leaves no completed response to persist.
-          }
-          break;
-        }
-
-        // Get response messages for completed steps.
-        const responseMessages = await result.responseMessages;
-
-        // Add response messages to history
-        if (responseMessages.length) {
-          responseHistory.push(...responseMessages);
-        }
-
-        // Add approval response if processed
-        if (streamResult.approvalResponse) {
-          // Check if the last message is a tool message we can append to
-          const lastMsg = responseHistory[responseHistory.length - 1];
-          if (
-            lastMsg &&
-            lastMsg.role === 'tool' &&
-            Array.isArray(lastMsg.content) &&
-            Array.isArray(streamResult.approvalResponse.content)
-          ) {
-            const toolContent = lastMsg.content as unknown[];
-            toolContent.push(...streamResult.approvalResponse.content);
-          } else {
-            // Add as separate message
-            responseHistory.push(streamResult.approvalResponse);
-          }
-        }
-
-        continueLoop = streamResult.approvalProcessed;
+      await this._historyQueue;
+      await this._agent.waitForIdle();
+      if (controller.signal.aborted) {
+        return;
       }
-
-      // Add the messages to the history only if the response ended without error.
-      this._history.push(...Private.sanitizeModelMessages(responseHistory));
+      await this._agent.prompt({
+        role: 'user',
+        content: message,
+        timestamp: Date.now()
+      });
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
-        let helpMessage = `${(error as Error).message}`;
-
-        // Remove attachments from history on payload rejection errors
-        if (
-          APICallError.isInstance(error) &&
-          (error.statusCode === 400 ||
-            error.statusCode === 404 ||
-            error.statusCode === 413 ||
-            error.statusCode === 415 ||
-            error.statusCode === 422)
-        ) {
-          this._stripAttachments(
-            [...this._history, ...responseHistory],
-            '_Attachment removed due to error_'
-          );
-          helpMessage +=
-            '\n\nAttachments have been removed from history. Please send your prompt again.';
-        }
         this._agentEvent.emit({
           type: 'error',
-          data: { error: new Error(helpMessage) }
-        });
-        this._history.push(...Private.sanitizeModelMessages(responseHistory));
-        this._history.push({
-          role: 'assistant',
-          content: helpMessage
+          data: {
+            error: error instanceof Error ? error : new Error(String(error))
+          }
         });
       }
     } finally {
-      this._controller = null;
+      if (this._controller === controller) {
+        this._controller = null;
+      }
       this._streaming.resolve();
     }
   }
 
   /**
-   * Create a transient language model to request a text response which won't be added to history.
-   * @param messages - the messages sequence to send to the model.
+   * Request a one-off text response, which won't be added to history.
    */
-  async textResponse(messages: ModelMessage[]): Promise<string> {
+  async textResponse(prompt: string, systemPrompt?: string): Promise<string> {
     try {
-      const model = await this._createModel();
-      const instructions = messages.filter(
-        (message): message is SystemModelMessage => message.role === 'system'
-      );
-      const result = await generateText({
+      const model = this._agentConfig?.model ?? this._createModel();
+      const message = await this._providerRegistry.models.completeSimple(
         model,
-        ...(instructions.length > 0 && { instructions }),
-        messages: messages.filter(message => message.role !== 'system')
-      });
-      this._updateTokenUsage(result.usage, result.usage.inputTokens);
-      return result.text;
+        {
+          systemPrompt,
+          messages: [{ role: 'user', content: prompt, timestamp: Date.now() }]
+        },
+        {
+          apiKey: await this._apiKey(),
+          temperature: this._agentConfig?.temperature
+        }
+      );
+      if (message.stopReason === 'error') {
+        throw new Error(message.errorMessage ?? 'The request failed');
+      }
+      this._updateTokenUsage(message.usage);
+      return message.content
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('');
     } catch (e) {
       throw `Error while getting the topic of the chat\n${e}`;
     }
   }
 
   /**
-   * Updates cumulative token usage statistics from a completed model step.
+   * Initializes the AI agent with current settings and tools.
+   * Sets up the agent with model configuration, tools, and MCP tools.
    */
-  private _updateTokenUsage(
-    usage: { inputTokens?: number; outputTokens?: number } | undefined,
-    lastRequestInputTokens?: number
-  ): void {
-    const contextWindow = this._getActiveContextWindow();
-    const estimatedRequestInputTokens =
-      lastRequestInputTokens ?? usage?.inputTokens;
+  initializeAgent = async (mcpTools?: ToolMap): Promise<void> => {
+    this._initQueue = this._initQueue
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          this._refreshSkills();
+          this._prepareAgentConfig(mcpTools);
+          this._applyAgentConfig();
+        } catch (error) {
+          console.warn('Failed to initialize agent:', error);
+          this._configured = false;
+        }
+      });
+    return this._initQueue;
+  };
 
-    if (usage) {
-      this._tokenUsage.inputTokens += usage.inputTokens ?? 0;
-      this._tokenUsage.outputTokens += usage.outputTokens ?? 0;
+  // ---------------------------------------------------------------------
+  // Agent events
+  // ---------------------------------------------------------------------
+
+  private _onEvent(event: AgentEvent): void {
+    switch (event.type) {
+      case 'agent_start':
+        this._turns = 0;
+        break;
+      case 'message_start':
+        if (event.message.role === 'assistant') {
+          this._messageId = undefined;
+          this._text = '';
+        }
+        break;
+      case 'message_update': {
+        const inner = event.assistantMessageEvent;
+        if (inner.type !== 'text_delta') {
+          break;
+        }
+        if (!this._messageId) {
+          this._messageId = `msg-${Date.now()}-${Math.random()}`;
+          this._agentEvent.emit({
+            type: 'message_start',
+            data: { messageId: this._messageId }
+          });
+        }
+        this._text += inner.delta;
+        this._agentEvent.emit({
+          type: 'message_chunk',
+          data: {
+            messageId: this._messageId,
+            chunk: inner.delta,
+            fullContent: this._text
+          }
+        });
+        break;
+      }
+      case 'message_end': {
+        const { message } = event;
+        if (message.role !== 'assistant') {
+          break;
+        }
+        this._completeMessage();
+        this._updateTokenUsage(message.usage);
+        if (message.stopReason === 'error') {
+          this._agentEvent.emit({
+            type: 'error',
+            data: {
+              error: new Error(message.errorMessage ?? 'The request failed')
+            }
+          });
+        }
+        break;
+      }
+      case 'tool_execution_start': {
+        const tool = this._runtimeTools[event.toolName];
+        this._agentEvent.emit({
+          type: 'tool_call_start',
+          data: {
+            callId: event.toolCallId,
+            toolName: event.toolName,
+            title: tool?.label,
+            input: this._formatToolInput(JSON.stringify(event.args))
+          }
+        });
+        break;
+      }
+      case 'tool_execution_end': {
+        const result = event.result as AgentToolResult<unknown> | undefined;
+        const text = (result?.content ?? [])
+          .filter(part => part.type === 'text')
+          .map(part => part.text)
+          .join('\n');
+        const details = result?.details;
+        const failed =
+          typeof details === 'object' &&
+          details !== null &&
+          (details as { success?: unknown }).success === false;
+        this._agentEvent.emit({
+          type: 'tool_call_complete',
+          data: {
+            callId: event.toolCallId,
+            toolName: event.toolName,
+            outputData: event.isError ? text || details : (details ?? text),
+            isError: event.isError || failed
+          }
+        });
+        break;
+      }
+      default:
+        break;
     }
+  }
 
-    this._tokenUsage.lastRequestInputTokens = estimatedRequestInputTokens;
-    this._tokenUsage.contextWindow = contextWindow;
+  private _completeMessage(): void {
+    if (!this._messageId) {
+      return;
+    }
+    this._agentEvent.emit({
+      type: 'message_complete',
+      data: { messageId: this._messageId, content: this._text }
+    });
+    this._messageId = undefined;
+    this._text = '';
+  }
 
-    this._tokenUsageChanged.emit(this._tokenUsage);
+  // ---------------------------------------------------------------------
+  // Tool approvals
+  // ---------------------------------------------------------------------
+
+  private async _beforeToolCall(
+    context: BeforeToolCallContext,
+    signal?: AbortSignal
+  ): Promise<BeforeToolCallResult | undefined> {
+    const { toolCall, args } = context;
+    const tool = this._runtimeTools[toolCall.name];
+    let needsApproval =
+      typeof tool?.needsApproval === 'function'
+        ? await tool.needsApproval(args)
+        : tool?.needsApproval === true;
+    if (!needsApproval && toolCall.name === 'execute_command') {
+      const policy = createExecuteCommandApprovalPolicy(this._settingsModel);
+      needsApproval = policy(args as { commandId: string }) === 'user-approval';
+    }
+    if (!needsApproval) {
+      return undefined;
+    }
+    const approved = await this._requestApproval(
+      toolCall.id,
+      toolCall.name,
+      args,
+      signal
+    );
+    return approved
+      ? undefined
+      : { block: true, reason: 'Tool execution was denied by the user.' };
   }
 
   /**
-   * Removes image and file parts from all user messages in the given list.
+   * Ask the UI for a confirmation. The pending approval is registered before
+   * the event so that a listener can answer synchronously.
    */
-  private _stripAttachments(
-    messages: ModelMessage[],
-    placeholder: string
-  ): void {
-    for (const msg of messages) {
-      if (msg.role === 'user' && Array.isArray(msg.content)) {
-        const hasMedia = msg.content.some(p => p.type !== 'text');
-        if (hasMedia) {
-          const textContent = msg.content
-            .filter(p => p.type === 'text')
-            .map(p => (p as { text: string }).text)
-            .join('\n');
-          msg.content = textContent || placeholder;
+  private _requestApproval(
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    return new Promise(resolve => {
+      const settle = (approved: boolean) => {
+        if (!this._pendingApprovals.delete(toolCallId)) {
+          return;
         }
-      }
+        resolve(approved);
+        this._agentEvent.emit({
+          type: 'tool_approval_resolved',
+          data: { toolCallId, approved }
+        });
+      };
+      this._pendingApprovals.set(toolCallId, settle);
+      signal?.addEventListener('abort', () => settle(false), { once: true });
+      this._agentEvent.emit({
+        type: 'tool_approval_request',
+        data: { toolCallId, toolName, args }
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Configuration
+  // ---------------------------------------------------------------------
+
+  /**
+   * The API key of the active provider, from the secrets manager or the
+   * settings. Providers that need no key get a placeholder.
+   */
+  private async _apiKey(): Promise<string | undefined> {
+    const config = this._settingsModel.getProvider(this._activeProvider);
+    if (!config) {
+      return undefined;
     }
+    let apiKey = '';
+    if (this._secretsManager && this._settingsModel.config.useSecretsManager) {
+      const token = Private.getToken();
+      if (!token) {
+        // This should never happen, the secrets manager should be disabled.
+        console.error(
+          '@jupyterlite/ai::AgentManager error: the settings manager token is not set.\nYou should disable the the secrets manager from the AI settings.'
+        );
+      } else {
+        apiKey =
+          (
+            await this._secretsManager.get(
+              token,
+              SECRETS_NAMESPACE,
+              `${config.provider}:apiKey`
+            )
+          )?.value ?? '';
+      }
+    } else {
+      apiKey = this._settingsModel.getApiKey(config.id);
+    }
+    if (apiKey) {
+      return apiKey;
+    }
+    const info = this._providerRegistry.getProviderInfo(config.provider);
+    return info?.apiKeyRequirement === 'required' ? undefined : 'unused';
+  }
+
+  /**
+   * Updates cumulative token usage statistics from a completed model request.
+   */
+  private _updateTokenUsage(usage: Usage): void {
+    const input = usage.input + usage.cacheRead + usage.cacheWrite;
+    if (input === 0 && usage.output === 0) {
+      return;
+    }
+    this._tokenUsage.inputTokens += input;
+    this._tokenUsage.outputTokens += usage.output;
+    this._tokenUsage.lastRequestInputTokens = input;
+    this._tokenUsage.contextWindow = this._getActiveContextWindow();
+    this._tokenUsageChanged.emit(this._tokenUsage);
   }
 
   /**
@@ -792,26 +920,6 @@ export class AgentManager implements IAgentManager {
   }
 
   /**
-   * Initializes the AI agent with current settings and tools.
-   * Sets up the agent with model configuration, tools, and MCP tools.
-   */
-  initializeAgent = async (mcpTools?: ToolMap): Promise<void> => {
-    this._initQueue = this._initQueue
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          this._refreshSkills();
-          await this._prepareAgentConfig(mcpTools);
-          this._rebuildAgent();
-        } catch (error) {
-          console.warn('Failed to initialize agent:', error);
-          this._agent = null;
-        }
-      });
-    return this._initQueue;
-  };
-
-  /**
    * Refresh the in-memory skills snapshot from the skill registry.
    */
   private _refreshSkills(): void {
@@ -823,119 +931,93 @@ export class AgentManager implements IAgentManager {
   }
 
   /**
+   * The pi-ai model of the active provider configuration.
+   */
+  private _createModel(): Model<Api> {
+    const config = this._settingsModel.getProvider(this._activeProvider);
+    if (!config) {
+      throw new Error('No active provider configured');
+    }
+    const model = this._providerRegistry.createModel({
+      provider: config.provider,
+      model: config.model,
+      baseURL: config.baseURL,
+      headers: config.headers
+    });
+    if (!model) {
+      throw new Error(`Provider ${config.provider} not found`);
+    }
+    return model;
+  }
+
+  /**
+   * A pi message of the history.
+   */
+  private _toMessage(message: IHistoryMessage): Message {
+    const timestamp = Date.now();
+    if (message.role === 'user') {
+      return { role: 'user', content: message.content, timestamp };
+    }
+    const model = this._agentConfig?.model ?? NO_MODEL;
+    return {
+      role: 'assistant',
+      content: [{ type: 'text', text: contentText(message.content) }],
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: emptyUsage(),
+      stopReason: 'stop',
+      timestamp
+    };
+  }
+
+  /**
    * Prepare model, tools, and settings needed to (re)build the agent.
    */
-  private async _prepareAgentConfig(mcpTools?: ToolMap): Promise<void> {
+  private _prepareAgentConfig(mcpTools?: ToolMap): void {
     const config = this._settingsModel.config;
     if (mcpTools !== undefined) {
       this._mcpTools = mcpTools;
     }
 
-    const model = await this._createModel();
-
-    const supportsToolCalling = this._supportsToolCalling();
-    const canUseTools = config.toolsEnabled && supportsToolCalling;
-    const hasFunctionToolRegistry = !!(
-      this._toolRegistry && Object.keys(this._toolRegistry.tools).length > 0
-    );
-    const selectedFunctionTools =
-      canUseTools && hasFunctionToolRegistry ? this.selectedAgentTools : {};
-    const functionTools = canUseTools
-      ? { ...selectedFunctionTools, ...this._mcpTools }
+    const model = this._createModel();
+    const canUseTools = config.toolsEnabled && this._supportsToolCalling();
+    const tools: ToolMap = canUseTools
+      ? { ...this.selectedAgentTools, ...this._mcpTools }
       : {};
 
     const activeProviderConfig = this._settingsModel.getProvider(
       this._activeProvider
     );
-    const activeProviderInfo =
-      activeProviderConfig && this._providerRegistry
-        ? this._providerRegistry.getProviderInfo(activeProviderConfig.provider)
-        : null;
-    const contextWindow = getEffectiveContextWindow(
-      activeProviderConfig,
-      this._providerRegistry
-    );
-
-    this._tokenUsage.contextWindow = contextWindow;
+    this._tokenUsage.contextWindow = this._getActiveContextWindow();
     this._tokenUsageChanged.emit(this._tokenUsage);
-
-    const temperature =
-      activeProviderConfig?.parameters?.temperature ?? DEFAULT_TEMPERATURE;
-    const maxTokens = activeProviderConfig?.parameters?.maxOutputTokens;
-    const maxTurns =
-      activeProviderConfig?.parameters?.maxTurns ?? DEFAULT_MAX_TURNS;
-
-    const tools = this._buildRuntimeTools({
-      providerInfo: activeProviderInfo,
-      customSettings: activeProviderConfig?.customSettings,
-      functionTools,
-      includeProviderTools: canUseTools
-    });
-
-    const shouldUseTools = canUseTools && Object.keys(tools).length > 0;
 
     this._agentConfig = {
       model,
-      providerInfo: activeProviderInfo,
       tools,
-      temperature,
-      maxOutputTokens: maxTokens,
-      maxTurns,
+      temperature:
+        activeProviderConfig?.parameters?.temperature ?? DEFAULT_TEMPERATURE,
+      maxOutputTokens: activeProviderConfig?.parameters?.maxOutputTokens,
+      maxTurns: activeProviderConfig?.parameters?.maxTurns ?? DEFAULT_MAX_TURNS,
       baseSystemPrompt: config.systemPrompt || '',
-      shouldUseTools
+      shouldUseTools: canUseTools && Object.keys(tools).length > 0
     };
   }
 
   /**
-   * Build the runtime tool map used by the agent.
+   * Apply the cached configuration and the current skills snapshot to the agent.
    */
-  private _buildRuntimeTools(options: {
-    providerInfo?: IProviderInfo | null;
-    customSettings?: IProviderCustomSettings;
-    functionTools: ToolMap;
-    includeProviderTools: boolean;
-  }): ToolMap {
-    const providerTools = options.includeProviderTools
-      ? createProviderTools({
-          providerInfo: options.providerInfo,
-          customSettings: options.customSettings,
-          hasFunctionTools: Object.keys(options.functionTools).length > 0
-        })
-      : {};
-
-    return {
-      ...providerTools,
-      ...options.functionTools
-    };
-  }
-
-  /**
-   * Rebuild the agent using cached resources and the current skills snapshot.
-   */
-  private _rebuildAgent(): void {
+  private _applyAgentConfig(): void {
     if (!this._agentConfig) {
-      this._agent = null;
+      this._configured = false;
       return;
     }
 
-    const {
-      model,
-      providerInfo,
-      tools,
-      temperature,
-      maxOutputTokens,
-      maxTurns,
-      baseSystemPrompt,
-      shouldUseTools
-    } = this._agentConfig;
-    const toolsWithCacheProviderOptions =
-      Private.addCacheProviderOptionsToTools(tools, providerInfo);
+    const { model, tools, baseSystemPrompt, shouldUseTools } =
+      this._agentConfig;
 
     const baseInstructions = shouldUseTools
-      ? this._getEnhancedSystemPrompt(
-          baseSystemPrompt,
-          toolsWithCacheProviderOptions
-        )
+      ? this._getEnhancedSystemPrompt(baseSystemPrompt, tools)
       : baseSystemPrompt || 'You are a helpful assistant.';
     const richOutputWorkflowInstruction = shouldUseTools
       ? '- When the user asks for visual or rich outputs, prefer running code/commands that produce those outputs and describe that they will be rendered in chat.'
@@ -951,252 +1033,32 @@ RICH OUTPUT RENDERING:
 - Do not claim that you cannot display maps, images, or rich outputs in chat.
 ${richOutputWorkflowInstruction}${this._additionalInstructions ? `\n\n${this._additionalInstructions}` : ''}`;
 
-    this._agent = new ToolLoopAgent({
-      model,
-      instructions,
-      tools: toolsWithCacheProviderOptions,
-      temperature,
-      maxOutputTokens,
-      prepareStep: ({ messages }) => ({
-        messages: Private.addCacheProviderOptionsToMessages(
-          messages,
-          providerInfo
-        )
-      }),
-      stopWhen: isStepCount(maxTurns),
-      toolApproval: {
-        execute_command: createExecuteCommandApprovalPolicy(this._settingsModel)
-      }
-    });
+    this._runtimeTools = shouldUseTools ? tools : {};
+    const state = this._agent.state;
+    state.systemPrompt = instructions;
+    state.model = model;
+    state.tools = shouldUseTools ? Object.values(tools) : [];
+    this._configured = true;
   }
 
   /**
-   * Processes the stream result from agent execution.
-   * Handles message streaming, tool calls, and emits appropriate events.
-   * @param result The stream result from agent execution
-   * @returns Processing result including approval info if applicable
+   * Checks if the current provider supports tool calling.
+   * @returns True if the provider supports tool calling, false otherwise
    */
-  private async _processStreamResult(
-    result: AgentStreamResult
-  ): Promise<IStreamProcessResult> {
-    let fullResponse = '';
-    let currentMessageId: string | null = null;
-    const processResult: IStreamProcessResult = {
-      approvalProcessed: false,
-      aborted: false
-    };
-
-    for await (const part of result.stream) {
-      switch (part.type) {
-        case 'text-delta':
-          if (!currentMessageId) {
-            currentMessageId = `msg-${Date.now()}-${Math.random()}`;
-            this._agentEvent.emit({
-              type: 'message_start',
-              data: { messageId: currentMessageId }
-            });
-          }
-          fullResponse += part.text;
-          this._agentEvent.emit({
-            type: 'message_chunk',
-            data: {
-              messageId: currentMessageId,
-              chunk: part.text,
-              fullContent: fullResponse
-            }
-          });
-          break;
-
-        case 'tool-call': {
-          // Complete current message before tool call
-          if (currentMessageId && fullResponse) {
-            this._emitMessageComplete(currentMessageId, fullResponse);
-            currentMessageId = null;
-            fullResponse = '';
-          }
-          const metadataTitle = part.toolMetadata?.title;
-          this._agentEvent.emit({
-            type: 'tool_call_start',
-            data: {
-              callId: part.toolCallId,
-              toolName: part.toolName,
-              title:
-                typeof metadataTitle === 'string' ? metadataTitle : part.title,
-              input: this._formatToolInput(JSON.stringify(part.input))
-            }
-          });
-          break;
-        }
-
-        case 'tool-result':
-          this._handleToolResult(part);
-          break;
-
-        case 'tool-error':
-          this._handleToolError(part);
-          break;
-
-        case 'tool-output-denied':
-          this._handleToolOutputDenied(part);
-          break;
-
-        case 'tool-approval-request':
-          // Complete current message before approval
-          if (currentMessageId && fullResponse) {
-            this._emitMessageComplete(currentMessageId, fullResponse);
-            currentMessageId = null;
-            fullResponse = '';
-          }
-          await this._handleApprovalRequest(part, processResult);
-          break;
-
-        case 'error':
-          throw part.error;
-
-        case 'finish-step':
-          this._updateTokenUsage(part.usage, part.usage.inputTokens);
-          break;
-
-        case 'abort':
-          processResult.aborted = true;
-          break;
-
-        // Ignore: text-start, text-end, finish, and others
-        default:
-          break;
-      }
+  private _supportsToolCalling(): boolean {
+    const activeProviderConfig = this._settingsModel.getProvider(
+      this._activeProvider
+    );
+    if (!activeProviderConfig) {
+      return false;
     }
 
-    // Complete final message if content remains
-    if (currentMessageId && fullResponse) {
-      this._emitMessageComplete(currentMessageId, fullResponse);
-    }
+    const providerInfo = this._providerRegistry.getProviderInfo(
+      activeProviderConfig.provider
+    );
 
-    return processResult;
-  }
-
-  /**
-   * Emits a message_complete event.
-   */
-  private _emitMessageComplete(messageId: string, content: string): void {
-    this._agentEvent.emit({
-      type: 'message_complete',
-      data: { messageId, content }
-    });
-  }
-
-  /**
-   * Handles tool-result stream parts.
-   */
-  private _handleToolResult(part: TypedToolResult<ToolMap>): void {
-    const isError =
-      typeof part.output === 'object' &&
-      part.output !== null &&
-      'success' in part.output &&
-      part.output.success === false;
-
-    this._agentEvent.emit({
-      type: 'tool_call_complete',
-      data: {
-        callId: part.toolCallId,
-        toolName: part.toolName,
-        outputData: part.output,
-        isError
-      }
-    });
-  }
-
-  /**
-   * Handles tool-error stream parts.
-   */
-  private _handleToolError(part: TypedToolError<ToolMap>): void {
-    const output =
-      typeof part.error === 'string'
-        ? part.error
-        : part.error instanceof Error
-          ? part.error.message
-          : JSON.stringify(part.error, null, 2);
-
-    this._agentEvent.emit({
-      type: 'tool_call_complete',
-      data: {
-        callId: part.toolCallId,
-        toolName: part.toolName,
-        outputData: output,
-        isError: true
-      }
-    });
-  }
-
-  /**
-   * Handles tool-output-denied stream parts.
-   */
-  private _handleToolOutputDenied(part: TypedToolOutputDenied<ToolMap>): void {
-    this._agentEvent.emit({
-      type: 'tool_call_complete',
-      data: {
-        callId: part.toolCallId,
-        toolName: part.toolName,
-        outputData: 'Tool output was denied.',
-        isError: true
-      }
-    });
-  }
-
-  /**
-   * Handles tool-approval-request stream parts.
-   */
-  private async _handleApprovalRequest(
-    part: ToolApprovalRequestOutput<ToolMap>,
-    result: IStreamProcessResult
-  ): Promise<void> {
-    const { approvalId, toolCall } = part;
-
-    // Register the pending approval first so that a listener can answer
-    // synchronously while handling the event.
-    const approval = this._waitForApproval(toolCall.toolCallId);
-    this._agentEvent.emit({
-      type: 'tool_approval_request',
-      data: {
-        toolCallId: toolCall.toolCallId,
-        toolName: toolCall.toolName,
-        args: toolCall.input
-      }
-    });
-
-    const approved = await approval;
-
-    result.approvalProcessed = true;
-    // A step can request approval for several tool calls; every response
-    // must be sent back or the model call fails with a missing tool result.
-    const response = {
-      type: 'tool-approval-response' as const,
-      approvalId,
-      approved
-    };
-    if (
-      result.approvalResponse &&
-      Array.isArray(result.approvalResponse.content)
-    ) {
-      (result.approvalResponse.content as unknown[]).push(response);
-    } else {
-      result.approvalResponse = { role: 'tool', content: [response] };
-    }
-  }
-
-  /**
-   * Waits for user approval of a tool call.
-   * @param toolCallId The tool call ID to wait for approval
-   * @returns Promise that resolves to true if approved, false if rejected
-   */
-  private _waitForApproval(toolCallId: string): Promise<boolean> {
-    return new Promise(resolve => {
-      this._pendingApprovals.set(toolCallId, {
-        resolve: (approved: boolean) => {
-          resolve(approved);
-        }
-      });
-    });
+    // Default to true if supportsToolCalling is not specified
+    return providerInfo?.supportsToolCalling !== false;
   }
 
   /**
@@ -1211,42 +1073,6 @@ ${richOutputWorkflowInstruction}${this._additionalInstructions ? `\n\n${this._ad
     } catch {
       return input;
     }
-  }
-
-  /**
-   * Checks if the current provider supports tool calling.
-   * @returns True if the provider supports tool calling, false otherwise
-   */
-  private _supportsToolCalling(): boolean {
-    const activeProviderConfig = this._settingsModel.getProvider(
-      this._activeProvider
-    );
-    if (!activeProviderConfig || !this._providerRegistry) {
-      return false;
-    }
-
-    const providerInfo = this._providerRegistry.getProviderInfo(
-      activeProviderConfig.provider
-    );
-
-    // Default to true if supportsToolCalling is not specified
-    return providerInfo?.supportsToolCalling !== false;
-  }
-
-  /**
-   * Creates a model instance based on current settings.
-   * @returns The configured model instance for the agent
-   */
-  private _createModel(): Promise<LanguageModel> {
-    if (!this._activeProvider) {
-      throw new Error('No active provider configured');
-    }
-    return Private.createProviderModel({
-      providerId: this._activeProvider,
-      settingsModel: this._settingsModel,
-      providerRegistry: this._providerRegistry,
-      secretsManager: this._secretsManager
-    });
   }
 
   /**
@@ -1279,24 +1105,13 @@ ${lines.join('\n')}
       prompt += skillsPrompt;
     }
 
-    const toolNames = new Set(Object.keys(tools));
-    const hasBrowserFetch = toolNames.has('browser_fetch');
-    const hasWebFetch = toolNames.has('web_fetch');
-    const hasWebSearch = toolNames.has('web_search');
-
-    if (hasBrowserFetch || hasWebFetch || hasWebSearch) {
-      const webRetrievalPrompt = `
+    if ('browser_fetch' in tools) {
+      prompt += `
 
 WEB RETRIEVAL POLICY:
-- If the user asks about a specific URL and browser_fetch is available, call browser_fetch first for that URL.
-- If browser_fetch fails due to CORS/network/access, try web_fetch (if available) for that same URL.
-- If web_fetch fails with access/policy errors (for example: url_not_accessible or url_not_allowed) and browser_fetch is available, you MUST call browser_fetch for that same URL before searching.
-- If either fetch method fails with temporary access/network issues (for example: network_or_cors), try the other fetch method if available before searching.
-- Only fall back to web_search after both fetch methods fail or are unavailable.
-- If the user explicitly asks to inspect one exact URL, do not skip directly to search unless both fetch methods fail or are unavailable.
-- In your final response, state which retrieval method succeeded (browser_fetch, web_fetch, or web_search) and mention relevant limitations.
+- If the user asks about a specific URL, call browser_fetch for that URL first.
+- If browser_fetch fails due to CORS, network or access restrictions, say so and explain what the user can do instead.
 `;
-      prompt += webRetrievalPrompt;
     }
 
     return prompt;
@@ -1322,14 +1137,18 @@ WEB RETRIEVAL POLICY:
   // Private attributes
   private _settingsModel: IAISettingsModel;
   private _toolRegistry?: IToolRegistry;
-  private _providerRegistry?: IProviderRegistry;
+  private _providerRegistry: IProviderRegistry;
   private _skillRegistry?: ISkillRegistry;
   private _secretsManager?: ISecretsManager;
   private _selectedToolNames: string[];
-  private _agent: ToolLoopAgent<never, ToolMap> | null;
-  private _history: ModelMessage[];
+  private _agent: Agent;
+  private _controller: AbortController | null = null;
+  private _configured = false;
+  private _runtimeTools: ToolMap = {};
   private _mcpTools: ToolMap;
-  private _controller: AbortController | null;
+  private _turns = 0;
+  private _messageId?: string;
+  private _text = '';
   private _agentEvent: Signal<this, IAgentManager.IAgentEvent>;
   private _tokenUsage: ITokenUsage;
   private _tokenUsageChanged: Signal<this, ITokenUsage>;
@@ -1339,207 +1158,16 @@ WEB RETRIEVAL POLICY:
   private _renderMimeRegistry?: IRenderMimeRegistry;
   private _additionalInstructions?: string;
   private _initQueue: Promise<void> = Promise.resolve();
+  private _historyQueue: Promise<void> = Promise.resolve();
   private _agentConfig: IAgentConfig | null;
-  private _pendingApprovals: Map<
+  private _pendingApprovals = new Map<
     string,
-    { resolve: (approved: boolean, reason?: string) => void }
-  > = new Map();
+    (approved: boolean, reason?: string) => void
+  >();
   private _streaming: PromiseDelegate<void> = new PromiseDelegate();
 }
 
 namespace Private {
-  type ProviderOptions = NonNullable<ModelMessage['providerOptions']>;
-
-  /**
-   * Merge provider options by provider key, preserving provider-specific fields.
-   */
-  const mergeProviderOptions = (
-    ...providerOptionsList: Array<ModelMessage['providerOptions'] | undefined>
-  ): ModelMessage['providerOptions'] => {
-    const merged: ProviderOptions = {};
-
-    for (const providerOptions of providerOptionsList) {
-      if (!providerOptions) {
-        continue;
-      }
-
-      for (const [provider, options] of Object.entries(providerOptions)) {
-        merged[provider] = {
-          ...(merged[provider] ?? {}),
-          ...options
-        };
-      }
-    }
-
-    return Object.keys(merged).length > 0 ? merged : undefined;
-  };
-
-  /**
-   * Add provider cache options to runtime tool definitions.
-   */
-  export const addCacheProviderOptionsToTools = (
-    tools: ToolMap,
-    providerInfo?: IProviderInfo | null
-  ): ToolMap => {
-    const cacheProviderOptions = providerInfo?.cacheProviderOptions;
-    if (!cacheProviderOptions || Object.keys(tools).length === 0) {
-      return tools;
-    }
-
-    return Object.fromEntries(
-      Object.entries(tools).map(([name, tool]) => [
-        name,
-        {
-          ...tool,
-          providerOptions: mergeProviderOptions(
-            cacheProviderOptions,
-            tool.providerOptions
-          )
-        }
-      ])
-    );
-  };
-
-  /**
-   * Add provider cache options to the last message.
-   */
-  export const addCacheProviderOptionsToMessages = (
-    messages: ModelMessage[],
-    providerInfo?: IProviderInfo | null
-  ): ModelMessage[] => {
-    const cacheProviderOptions = providerInfo?.cacheProviderOptions;
-    if (messages.length === 0 || !cacheProviderOptions) {
-      return messages;
-    }
-
-    return messages.map((message, index) =>
-      index === messages.length - 1
-        ? {
-            ...message,
-            providerOptions: mergeProviderOptions(
-              cacheProviderOptions,
-              message.providerOptions
-            )
-          }
-        : message
-    );
-  };
-
-  /**
-   * Sanitize the messages before adding them to the history.
-   *
-   * 1- Make sure the message sequence is not altered:
-   *   - tool-call messages should have a corresponding tool-result (and vice-versa)
-   *   - tool-approval-request should have a tool-approval-response (and vice-versa)
-   *
-   * 2- Keep only serializable messages by doing a JSON round-trip.
-   *    Messages that cannot be serialized are dropped.
-   */
-  export const sanitizeModelMessages = (
-    messages: ModelMessage[]
-  ): ModelMessage[] => {
-    const sanitized: ModelMessage[] = [];
-    for (const message of messages) {
-      if (message.role === 'assistant') {
-        let newMessage: AssistantModelMessage | undefined;
-        if (!Array.isArray(message.content)) {
-          newMessage = message;
-        } else {
-          // Remove assistant message content without a required response.
-          const newContent: typeof message.content = [];
-          for (const assistantContent of message.content) {
-            let isContentValid = true;
-            if (assistantContent.type === 'tool-call') {
-              const toolCallId = assistantContent.toolCallId;
-              isContentValid = !!messages.find(
-                msg =>
-                  msg.role === 'tool' &&
-                  Array.isArray(msg.content) &&
-                  msg.content.find(
-                    content =>
-                      content.type === 'tool-result' &&
-                      content.toolCallId === toolCallId
-                  )
-              );
-            } else if (assistantContent.type === 'tool-approval-request') {
-              const approvalId = assistantContent.approvalId;
-              isContentValid = !!messages.find(
-                msg =>
-                  msg.role === 'tool' &&
-                  Array.isArray(msg.content) &&
-                  msg.content.find(
-                    content =>
-                      content.type === 'tool-approval-response' &&
-                      content.approvalId === approvalId
-                  )
-              );
-            }
-            if (isContentValid) {
-              newContent.push(assistantContent);
-            }
-          }
-          if (newContent.length) {
-            newMessage = { ...message, content: newContent };
-          }
-        }
-        if (newMessage) {
-          try {
-            sanitized.push(JSON.parse(JSON.stringify(newMessage)));
-          } catch {
-            // Drop messages that cannot be serialized
-          }
-        }
-      } else if (message.role === 'tool') {
-        // Remove tool message content without request.
-        const newContent: typeof message.content = [];
-        for (const toolContent of message.content) {
-          let isContentValid = true;
-          if (toolContent.type === 'tool-result') {
-            const toolCallId = toolContent.toolCallId;
-            isContentValid = !!sanitized.find(
-              msg =>
-                msg.role === 'assistant' &&
-                Array.isArray(msg.content) &&
-                msg.content.find(
-                  content =>
-                    content.type === 'tool-call' &&
-                    content.toolCallId === toolCallId
-                )
-            );
-          } else if (toolContent.type === 'tool-approval-response') {
-            const approvalId = toolContent.approvalId;
-            isContentValid = !!sanitized.find(
-              msg =>
-                msg.role === 'assistant' &&
-                Array.isArray(msg.content) &&
-                msg.content.find(
-                  content =>
-                    content.type === 'tool-approval-request' &&
-                    content.approvalId === approvalId
-                )
-            );
-          }
-          if (isContentValid) {
-            newContent.push(toolContent);
-          }
-        }
-        if (newContent.length) {
-          try {
-            sanitized.push(
-              JSON.parse(JSON.stringify({ ...message, content: newContent }))
-            );
-          } catch {
-            // Drop messages that cannot be serialized
-          }
-        }
-      } else {
-        // Message is a system or user message.
-        sanitized.push(message);
-      }
-    }
-    return sanitized.length === messages.length ? sanitized : [];
-  };
-
   /**
    * The token to use with the secrets manager, setter and getter.
    */
@@ -1549,48 +1177,5 @@ namespace Private {
   }
   export function getToken(): symbol | null {
     return secretsToken;
-  }
-
-  /**
-   * Create the language model of a provider config, with the API key taken
-   * from the secrets manager when it is in use.
-   */
-  export async function createProviderModel(options: {
-    providerId: string;
-    settingsModel: IAISettingsModel;
-    providerRegistry?: IProviderRegistry;
-    secretsManager?: ISecretsManager;
-  }): Promise<LanguageModel> {
-    const { settingsModel, providerRegistry, secretsManager } = options;
-    const providerConfig = settingsModel.getProvider(options.providerId);
-    if (!providerConfig) {
-      throw new Error('No active provider configured');
-    }
-    const { provider, model, baseURL } = providerConfig;
-
-    let apiKey: string;
-    if (secretsManager && settingsModel.config.useSecretsManager) {
-      const token = getToken();
-      if (!token) {
-        // This should never happen, the secrets manager should be disabled.
-        console.error(
-          '@jupyterlite/ai::AgentManager error: the settings manager token is not set.\nYou should disable the the secrets manager from the AI settings.'
-        );
-        apiKey = '';
-      } else {
-        apiKey =
-          (
-            await secretsManager.get(
-              token,
-              SECRETS_NAMESPACE,
-              `${provider}:apiKey`
-            )
-          )?.value ?? '';
-      }
-    } else {
-      apiKey = settingsModel.getApiKey(providerConfig.id);
-    }
-
-    return createModel({ provider, model, apiKey, baseURL }, providerRegistry);
   }
 }

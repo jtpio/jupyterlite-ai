@@ -1,9 +1,5 @@
-import {
-  createCompletionModel,
-  IProviderRegistry,
-  SECRETS_NAMESPACE
-} from '@jupyternaut/agent';
-import type { IAISettingsModel } from '@jupyternaut/agent';
+import { IProviderRegistry, SECRETS_NAMESPACE } from '@jupyternaut/agent';
+import type { Api, IAISettingsModel, Model } from '@jupyternaut/agent';
 import {
   CompletionHandler,
   IInlineCompletionContext,
@@ -11,7 +7,6 @@ import {
   IInlineCompletionProvider
 } from '@jupyterlab/completer';
 import { NotebookPanel } from '@jupyterlab/notebook';
-import { generateText, type LanguageModel } from 'ai';
 import { ISecretsManager } from 'jupyter-secrets-manager';
 
 /**
@@ -89,7 +84,8 @@ export class AICompletionProvider implements IInlineCompletionProvider {
     request: CompletionHandler.IRequest,
     context: IInlineCompletionContext
   ): Promise<IInlineCompletionList> {
-    if (!this._model) {
+    const model = this._model;
+    if (!model) {
       return { items: [] };
     }
 
@@ -123,12 +119,26 @@ export class AICompletionProvider implements IInlineCompletionProvider {
         }
       }
 
-      const { text: completion } = await generateText({
-        model: this._model,
-        prompt: completionPrompt,
-        instructions: this.systemPrompt,
-        temperature: providerConfig.temperature || 0.3
-      });
+      const message = await this._providerRegistry.models.completeSimple(
+        model,
+        {
+          systemPrompt: this.systemPrompt,
+          messages: [
+            { role: 'user', content: completionPrompt, timestamp: Date.now() }
+          ]
+        },
+        {
+          apiKey: this._apiKey,
+          temperature: providerConfig.temperature || 0.3
+        }
+      );
+      if (message.stopReason === 'error') {
+        throw new Error(message.errorMessage ?? 'The request failed');
+      }
+      const completion = message.content
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('');
 
       // Clean up FIM tags and code block markers
       const cleanCompletion = completion
@@ -191,19 +201,17 @@ export class AICompletionProvider implements IInlineCompletionProvider {
       apiKey = this._settingsModel.getApiKey(activeProvider.id);
     }
 
-    try {
-      this._model = createCompletionModel(
-        {
-          provider,
-          model,
-          apiKey,
-          baseURL
-        },
-        this._providerRegistry
-      );
-    } catch (error) {
-      console.error(`Error creating model for ${provider}:`, error);
-      this._model = null;
+    const info = this._providerRegistry.getProviderInfo(provider);
+    this._apiKey =
+      apiKey || (info?.apiKeyRequirement === 'required' ? undefined : 'unused');
+    this._model = this._providerRegistry.createModel({
+      provider,
+      model,
+      baseURL,
+      headers: activeProvider.headers
+    });
+    if (!this._model) {
+      console.error(`Provider ${provider} not found`);
     }
   }
 
@@ -307,8 +315,9 @@ export class AICompletionProvider implements IInlineCompletionProvider {
   }
 
   private _settingsModel: IAISettingsModel;
-  private _providerRegistry?: IProviderRegistry;
-  private _model: LanguageModel | null = null;
+  private _providerRegistry: IProviderRegistry;
+  private _model: Model<Api> | null = null;
+  private _apiKey?: string;
   private _secretsManager?: ISecretsManager;
 }
 
@@ -324,7 +333,7 @@ export namespace AICompletionProvider {
     /**
      * The provider registry
      */
-    providerRegistry?: IProviderRegistry;
+    providerRegistry: IProviderRegistry;
     /**
      * The secrets manager.
      */

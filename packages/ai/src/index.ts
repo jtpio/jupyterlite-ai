@@ -1153,13 +1153,12 @@ const inputToolbarFactory: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> =
     description: 'The input toolbar registry plugin.',
     autoStart: true,
     provides: IInputToolbarRegistryFactory,
-    requires: [IAISettingsModel, IToolRegistry, IProviderRegistry],
+    requires: [IAISettingsModel, IToolRegistry],
     optional: [ITranslator, IPersonaRegistry],
     activate: (
       app: JupyterFrontEnd,
       settingsModel: IAISettingsModel,
       toolRegistry: IToolRegistry,
-      providerRegistry: IProviderRegistry,
       translator?: ITranslator,
       personaHandlerRegistry?: IPersonaRegistry
     ): IInputToolbarRegistryFactory => {
@@ -1168,8 +1167,6 @@ const inputToolbarFactory: JupyterFrontEndPlugin<IInputToolbarRegistryFactory> =
       const clearButton = clearItem(trans);
       const toolSelectButton = createToolSelectItem(
         toolRegistry,
-        settingsModel,
-        providerRegistry,
         settingsModel.config.toolsEnabled,
         trans,
         personaHandlerRegistry

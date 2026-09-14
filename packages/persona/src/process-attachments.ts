@@ -5,18 +5,21 @@ import type { IDocumentManager } from '@jupyterlab/docmanager';
 import type { IDocumentWidget } from '@jupyterlab/docregistry';
 import * as nbformat from '@jupyterlab/nbformat';
 import type { INotebookModel, Notebook } from '@jupyterlab/notebook';
-import type { UserContent, FilePart } from 'ai';
+import type { ImageContent, UserContent } from '@jupyternaut/agent';
 
+/**
+ * The message content for a prompt with attachments: text files and notebook
+ * cells go in the text, images become image parts, other binary files are
+ * omitted.
+ */
 export async function processAttachments(
   attachments: IAttachment[],
   documentManager: IDocumentManager | null | undefined,
   body: string,
-  supportsImages: boolean,
-  supportsPdf: boolean,
-  supportsAudio: boolean
+  supportsImages: boolean
 ): Promise<UserContent> {
   const textContents: string[] = [];
-  const includedParts: FilePart[] = [];
+  const includedParts: ImageContent[] = [];
   const omittedNames: string[] = [];
 
   if (!documentManager) {
@@ -59,49 +62,16 @@ export async function processAttachments(
               documentManager
             );
             if (data) {
-              includedParts.push({
-                type: 'file',
-                data,
-                mediaType: mimetype
-              });
+              includedParts.push({ type: 'image', data, mimeType: mimetype });
             }
           } else {
             omittedNames.push(PathExt.basename(attachment.value));
           }
-        } else if (mimetype === 'application/pdf') {
-          if (supportsPdf) {
-            const data = await readBinaryAttachment(
-              attachment,
-              documentManager
-            );
-            if (data) {
-              includedParts.push({
-                type: 'file',
-                data,
-                mediaType: mimetype,
-                filename: PathExt.basename(attachment.value)
-              });
-            }
-          } else {
-            omittedNames.push(PathExt.basename(attachment.value));
-          }
-        } else if (mimetype?.startsWith('audio/')) {
-          if (supportsAudio) {
-            const data = await readBinaryAttachment(
-              attachment,
-              documentManager
-            );
-            if (data) {
-              includedParts.push({
-                type: 'file',
-                data,
-                mediaType: mimetype,
-                filename: PathExt.basename(attachment.value)
-              });
-            }
-          } else {
-            omittedNames.push(PathExt.basename(attachment.value));
-          }
+        } else if (
+          mimetype === 'application/pdf' ||
+          mimetype?.startsWith('audio/')
+        ) {
+          omittedNames.push(PathExt.basename(attachment.value));
         } else {
           const fileContent = await readFileAttachment(
             attachment,

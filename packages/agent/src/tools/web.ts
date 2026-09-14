@@ -1,6 +1,6 @@
-import { tool } from 'ai';
-import { z } from 'zod';
+import { Type } from '@earendil-works/pi-ai';
 
+import { jsonTool } from './define';
 import type { ITool } from '../tokens';
 
 const DEFAULT_MAX_CONTENT_CHARS = 20000;
@@ -104,36 +104,29 @@ async function readResponseText(
  * mixed content, bot protections).
  */
 export function createBrowserFetchTool(): ITool {
-  return tool({
-    metadata: { title: 'Browser Fetch' },
+  return jsonTool({
+    name: 'browser_fetch',
+    label: 'Browser Fetch',
     description:
       'Fetch a URL directly from the browser using HTTP GET for exact URL inspection when CORS/access permits.',
-    inputSchema: z.object({
-      url: z.string().describe('HTTP(S) URL to fetch'),
-      maxContentChars: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_ALLOWED_CONTENT_CHARS)
-        .optional()
-        .describe(
-          `Maximum number of response characters to return (default: ${DEFAULT_MAX_CONTENT_CHARS})`
-        ),
-      timeoutMs: z
-        .number()
-        .int()
-        .min(1000)
-        .max(MAX_TIMEOUT_MS)
-        .optional()
-        .describe(
-          `Timeout in milliseconds (default: ${DEFAULT_TIMEOUT_MS}, max: ${MAX_TIMEOUT_MS})`
-        )
+    parameters: Type.Object({
+      url: Type.String({ description: 'HTTP(S) URL to fetch' }),
+      maxContentChars: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: MAX_ALLOWED_CONTENT_CHARS,
+          description: `Maximum number of response characters to return (default: ${DEFAULT_MAX_CONTENT_CHARS})`
+        })
+      ),
+      timeoutMs: Type.Optional(
+        Type.Integer({
+          minimum: 1000,
+          maximum: MAX_TIMEOUT_MS,
+          description: `Timeout in milliseconds (default: ${DEFAULT_TIMEOUT_MS}, max: ${MAX_TIMEOUT_MS})`
+        })
+      )
     }),
-    execute: async (input: {
-      url: string;
-      maxContentChars?: number;
-      timeoutMs?: number;
-    }) => {
+    execute: async input => {
       const maxContentChars = Math.min(
         input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS,
         MAX_ALLOWED_CONTENT_CHARS
