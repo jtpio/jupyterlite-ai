@@ -157,7 +157,7 @@ export class PiHost {
           extensionFactories: [
             {
               name: 'jupyter',
-              hidden: true,
+              builtin: true,
               factory: jupyterExtension({
                 toolRegistry,
                 settingsModel,
@@ -173,7 +173,7 @@ export class PiHost {
             },
             {
               name: 'mcp',
-              hidden: true,
+              builtin: true,
               factory: createMcpExtension({
                 // The servers come from the MCP settings of JupyterLab.
                 loadConfig: () => ({ servers: [], errors: [] }),
