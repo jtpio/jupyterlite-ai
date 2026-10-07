@@ -43,6 +43,7 @@ import {
   createDiscoverSkillsTool,
   createExecuteCommandTool,
   createLoadSkillTool,
+  forwardAuthCode,
   genericProvider,
   getAppAttribution,
   googleProvider,
@@ -50,6 +51,7 @@ import {
   mistralProvider,
   openaiProvider,
   openrouterProvider,
+  requestApiKey,
   AgentManagerFactory,
   IAgentManagerFactory,
   IAISettingsModel,
@@ -83,8 +85,6 @@ import { AICompletionProvider } from './completion';
 import { CompletionStatusWidget, JupyternautStopButton } from './components';
 
 import { AISettingsModel } from './models/settings-model';
-
-import { forwardAuthCode, requestApiKey } from './oauth/openrouter';
 
 import { PersonaRegistry } from './persona-registry';
 
@@ -1014,4 +1014,3 @@ export * from './tokens';
 
 // Export helper functions
 export { processAttachments } from './process-attachments';
-export { requestApiKey } from './oauth/openrouter';

@@ -46,6 +46,7 @@ export {
 } from './providers/model-info';
 export { createCompletionModel, type IModelOptions } from './providers/models';
 export { createProviderTools } from './providers/provider-tools';
+export { forwardAuthCode, requestApiKey } from './oauth/openrouter';
 export { ToolRegistry } from './tools/tool-registry';
 export {
   createDiscoverCommandsTool,
