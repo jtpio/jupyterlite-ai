@@ -156,8 +156,9 @@ export class PiHost {
         resourceLoaderOptions: {
           extensionFactories: [
             {
+              // Inline, not built-in: settings cannot turn off the approvals.
               name: 'jupyter',
-              builtin: true,
+              hidden: true,
               factory: jupyterExtension({
                 toolRegistry,
                 settingsModel,
