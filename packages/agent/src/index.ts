@@ -52,6 +52,7 @@ export {
   createExecuteCommandTool
 } from './tools/commands';
 export { createDiscoverSkillsTool, createLoadSkillTool } from './tools/skills';
+export { extractMimeBundles } from './tools/mime-bundles';
 export { createBrowserFetchTool } from './tools/web';
 export {
   loadSkillsFromPaths,
