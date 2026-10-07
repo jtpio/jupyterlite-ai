@@ -79,6 +79,10 @@ interface IToolCallState {
   permission?: 'pending' | 'resolved';
   selectedOptionId?: string;
   messageId?: Promise<string | undefined>;
+  /**
+   * Whether the final state was posted, in chats that cannot update it.
+   */
+  posted?: boolean;
 }
 
 /**
@@ -861,7 +865,9 @@ export class PiChatSession {
       metadata: { toolCalls: [entry] }
     };
     if (!this._editsKeepRichContent) {
-      if (tool.status !== 'in_progress') {
+      const final = tool.status !== 'awaiting_approval';
+      if (tool.status !== 'in_progress' && !(final && tool.posted)) {
+        tool.posted ||= final;
         await this._send({ body: '', mime_model });
       }
       return;
