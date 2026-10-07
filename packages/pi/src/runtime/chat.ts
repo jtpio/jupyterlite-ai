@@ -859,7 +859,23 @@ export class PiChatSession {
       data: { [COMPONENTS_MIME]: 'grouped-tool-calls' },
       metadata: { toolCalls: [entry] }
     };
+    if (!this._editsKeepRichContent) {
+      if (tool.status !== 'in_progress') {
+        await this._send({ body: '', mime_model });
+      }
+      return;
+    }
     await this._render(tool, { body: '', mime_model });
+  }
+
+  /**
+   * Whether an edited message keeps its rich content: a chat synchronized by
+   * a Jupyter server (jupyterlab-chat 0.25, private `_wsHandler`) drops it.
+   * There, a tool call is posted when it waits for an approval and when it
+   * ends, not updated.
+   */
+  private get _editsKeepRichContent(): boolean {
+    return !(this._model as { _wsHandler?: unknown })._wsHandler;
   }
 
   private _summary(tool: IToolCallState): string {

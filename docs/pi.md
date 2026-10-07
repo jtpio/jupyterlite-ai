@@ -186,6 +186,7 @@ key list.
   file suggestions do not list the JupyterLab files.
 - xterm.js sends Alt+Up and Alt+Down as Ctrl+Up and Ctrl+Down, so the pi keys
   that use them do not work.
-- In chats that a Jupyter server synchronizes, the tool calls do not update
-  after they are shown (jupyterlab-chat 0.25 drops the changes to the rich
-  content of a message). Jupyternaut has the same issue.
+- In chats that a Jupyter server synchronizes, jupyterlab-chat 0.25 drops the
+  changes to the rich content of a message and shows the messages of pi as
+  messages of the user. Pi posts each tool call when it waits for an approval
+  and when it ends, instead of updating it. Jupyternaut has the same issues.
