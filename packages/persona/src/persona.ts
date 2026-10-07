@@ -34,12 +34,11 @@ import { processAttachments } from './process-attachments';
 import { DEFAULT_PERSONA, type IPersona } from './tokens';
 
 type ToolStatus =
-  | 'pending'
+  | 'in_progress'
   | 'awaiting_approval'
-  | 'approved'
   | 'rejected'
   | 'completed'
-  | 'error';
+  | 'failed';
 
 interface IToolExecutionContext {
   toolCallId: string;
@@ -501,7 +500,7 @@ export class Persona implements IPersona {
       toolName: event.data.toolName,
       title: event.data.title,
       input: event.data.input,
-      status: 'pending',
+      status: 'in_progress',
       summary,
       shouldAutoRenderMimeBundles
     };
@@ -558,7 +557,7 @@ export class Persona implements IPersona {
       return;
     }
     const context = this._toolContexts.get(event.data.callId);
-    const status = event.data.isError ? 'error' : 'completed';
+    const status = event.data.isError ? 'failed' : 'completed';
     this._updateToolCallUI(
       event.data.callId,
       status,
@@ -630,7 +629,7 @@ export class Persona implements IPersona {
     if (!context) {
       return;
     }
-    const status = event.data.approved ? 'approved' : 'rejected';
+    const status = event.data.approved ? 'in_progress' : 'rejected';
     this._updateToolCallUI(event.data.toolCallId, status);
     if (!event.data.approved) {
       this._toolContexts.delete(event.data.toolCallId);
