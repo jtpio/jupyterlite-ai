@@ -1,11 +1,13 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  ExtensionFactory,
-  McpServerConfig,
-  ToolDefinition
+import {
+  keyHint,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ExtensionFactory,
+  type McpServerConfig,
+  type ToolDefinition
 } from '@earendil-works/pi-coding-agent';
 import type { TSchema } from '@earendil-works/pi-ai';
+import { Text } from '@earendil-works/pi-tui';
 import type {
   IAISettingsModel,
   ITool,
@@ -85,6 +87,7 @@ const SKIPPED_TOOLS = new Set(['discover_skills', 'load_skill']);
 const GUARDED_TOOLS = new Set(['bash', 'edit', 'write']);
 
 const MAX_OUTPUT_CHARS = 50000;
+const PREVIEW_LINES = 10;
 
 export const AUTO_COMMAND = {
   name: 'auto',
@@ -265,6 +268,32 @@ function abortable<T>(
 }
 
 /**
+ * The result of a registry tool in the terminal: its JSON output is one long
+ * line, shown indented and collapsed to a few lines as pi does.
+ */
+const renderResult: NonNullable<ToolDefinition['renderResult']> = (
+  result,
+  { expanded },
+  theme
+) => {
+  let output = result.content
+    .map(part => (part.type === 'text' ? part.text : ''))
+    .join('\n');
+  try {
+    output = JSON.stringify(JSON.parse(output), null, 2);
+  } catch {
+    // Not JSON: show the text as it is.
+  }
+  const lines = output.split('\n');
+  const shown = expanded ? lines : lines.slice(0, PREVIEW_LINES);
+  let text = shown.map(line => theme.fg('toolOutput', line)).join('\n');
+  if (lines.length > shown.length) {
+    text += `${theme.fg('muted', `\n... (${lines.length - shown.length} more lines,`)} ${keyHint('app.tools.expand', 'to expand')}${theme.fg('muted', ')')}`;
+  }
+  return new Text(text, 0, 0);
+};
+
+/**
  * A Jupyternaut registry tool (AI SDK) as a pi tool.
  */
 function bridgeTool(
@@ -282,6 +311,7 @@ function bridgeTool(
     promptSnippet: description.split(/(?<=\.)\s/)[0],
     promptGuidelines: TOOL_GUIDELINES[name],
     parameters: inputJsonSchema(tool) as unknown as TSchema,
+    renderResult,
     async execute(toolCallId, params, signal) {
       if (!tool.execute) {
         throw new Error(`The tool ${name} cannot run in the browser`);
