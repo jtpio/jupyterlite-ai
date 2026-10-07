@@ -53,7 +53,6 @@ import {
   AgentManagerFactory,
   IAgentManagerFactory,
   IAISettingsModel,
-  IDiffManager,
   IProviderRegistry,
   IToolRegistry,
   ISkillRegistry,
@@ -82,8 +81,6 @@ import { MentionCommandProvider, SkillsCommandProvider } from './chat-commands';
 import { AICompletionProvider } from './completion';
 
 import { CompletionStatusWidget, JupyternautStopButton } from './components';
-
-import { DiffManager } from './diff-manager';
 
 import { AISettingsModel } from './models/settings-model';
 
@@ -709,26 +706,6 @@ const settingsModel: JupyterFrontEndPlugin<IAISettingsModel> = {
 };
 
 /**
- * Diff manager plugin
- */
-const diffManager: JupyterFrontEndPlugin<IDiffManager> = {
-  id: '@jupyternaut/persona:diff-manager',
-  description: 'Provide the diff manager for notebook cell diffs',
-  autoStart: true,
-  provides: IDiffManager,
-  requires: [IAISettingsModel],
-  activate: (
-    app: JupyterFrontEnd,
-    settingsModel: IAISettingsModel
-  ): IDiffManager => {
-    return new DiffManager({
-      commands: app.commands,
-      settingsModel
-    });
-  }
-};
-
-/**
  * Skill registry plugin
  */
 const skillRegistryPlugin: JupyterFrontEndPlugin<ISkillRegistry> = {
@@ -1029,9 +1006,7 @@ export default [
   skillsCommandPlugin,
   // Settings
   settingsModel,
-  settingsPanelPlugin,
-  // Diff manager (to be removed ?)
-  diffManager
+  settingsPanelPlugin
 ];
 
 // Export extension points for other extensions to use

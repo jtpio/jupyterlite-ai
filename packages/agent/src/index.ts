@@ -3,10 +3,8 @@
 export { AgentManagerFactory } from './agent';
 export { AI_AVATAR, jupyternautIcon } from './icons';
 export {
-  IAgentManager,
   IAgentManagerFactory,
   IAISettingsModel,
-  IDiffManager,
   IProviderRegistry,
   ISkillRegistry,
   IToolRegistry,
@@ -14,6 +12,7 @@ export {
   SECRETS_REPLACEMENT
 } from './tokens';
 export type {
+  IAgentManager,
   IAIConfig,
   IAISecretsAccess,
   IConnectAccountOptions,
@@ -24,8 +23,6 @@ export type {
   IProviderModelInfo,
   IProviderParameters,
   IProviderToolCapabilities,
-  IShowCellDiffParams,
-  IShowFileDiffParams,
   ITokenUsage,
   ITool,
   ToolMap
