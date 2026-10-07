@@ -119,6 +119,10 @@ export class PiHost {
     return this._options.settingsModel;
   }
 
+  get documentManager(): IDocumentManager | undefined {
+    return this._options.documentManager;
+  }
+
   /**
    * A shell for the bash tool, when JupyterLite terminals are available.
    */

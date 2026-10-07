@@ -5,9 +5,10 @@ import {
   type AgentSessionEvent,
   type AgentSessionRuntime
 } from '@earendil-works/pi-coding-agent';
-import type { Model } from '@earendil-works/pi-ai';
+import type { ImageContent, Model } from '@earendil-works/pi-ai';
 import type { PersonaStatePayload } from '@jupyter-ai/persona-manager';
 import type { IAttachment, IChatModel, IMessage, IUser } from '@jupyter/chat';
+import { processAttachments } from '@jupyternaut/persona';
 import { Signal, type ISignal } from '@lumino/signaling';
 import fs from 'fs';
 import { findInitialModel } from 'pi-coding-agent-package/dist/core/model-resolver.js';
@@ -164,22 +165,19 @@ function textOf(content: unknown): string {
     .join('');
 }
 
-function attachmentsPrompt(attachments: IAttachment[] = []): string {
-  if (!attachments.length) {
-    return '';
-  }
-  const lines = attachments.map(attachment => {
-    const file = `${DRIVE}/${attachment.value}`;
-    if (attachment.type === 'notebook' && attachment.cells?.length) {
-      return `- ${file} (cells: ${attachment.cells.map(cell => cell.id).join(', ')})`;
-    }
-    if (attachment.type === 'file' && attachment.selection) {
-      const { start, end, content } = attachment.selection;
-      return `- ${file}, lines ${start[0] + 1}-${end[0] + 1}:\n\n\`\`\`\n${content}\n\`\`\``;
-    }
-    return `- ${file}`;
-  });
-  return `\n\nAttached by the user:\n${lines.join('\n')}`;
+/**
+ * The lines that the user selected in the attached files: the prompt has the
+ * full files.
+ */
+function selectionsPrompt(attachments: IAttachment[]): string {
+  const lines = attachments.flatMap(attachment =>
+    attachment.type === 'file' && attachment.selection
+      ? [
+          `- ${attachment.value}, lines ${attachment.selection.start[0] + 1}-${attachment.selection.end[0] + 1}`
+        ]
+      : []
+  );
+  return lines.length ? `\n\nSelected by the user:\n${lines.join('\n')}` : '';
 }
 
 /**
@@ -440,7 +438,6 @@ export class PiChatSession {
         ? metadata.model
         : undefined;
     const command = text.match(/^\/(new|compact|auto)(?:\s+(.*))?$/s);
-    const prompt = text + attachmentsPrompt(message.attachments);
     try {
       if (command?.[1] === 'new') {
         await runtime.newSession();
@@ -452,7 +449,8 @@ export class PiChatSession {
         return;
       }
       if (!command && session.isStreaming) {
-        await session.prompt(prompt, { streamingBehavior: 'followUp' });
+        const { prompt, images } = await this._content(text, message, session);
+        await session.prompt(prompt, { streamingBehavior: 'followUp', images });
         this._notice(
           'Queued: pi reads this message when the current run is complete.'
         );
@@ -472,8 +470,9 @@ export class PiChatSession {
         await this._compact(session, command[2]);
         return;
       }
+      const { prompt, images } = await this._content(text, message, session);
       this._saveSessionFile(session.sessionFile);
-      await session.prompt(prompt, { preflightResult: started });
+      await session.prompt(prompt, { preflightResult: started, images });
     } catch (error) {
       if (!this._disposed && !this._stopRequested) {
         this._error(errorText(error));
@@ -484,6 +483,49 @@ export class PiChatSession {
         this._resumeQueue();
       }
     }
+  }
+
+  /**
+   * The prompt of a message with its attachments, read as Jupyternaut reads
+   * them: the cells of the open notebooks, the files, and the images when the
+   * model reads images.
+   */
+  private async _content(
+    text: string,
+    message: IMessage,
+    session: AgentSession
+  ): Promise<{ prompt: string; images?: ImageContent[] }> {
+    const attachments = message.attachments ?? [];
+    const documentManager = this._host.documentManager;
+    if (!attachments.length || !documentManager) {
+      return { prompt: text };
+    }
+    const content = await processAttachments(
+      attachments,
+      documentManager,
+      text,
+      !!session.model?.input.includes('image'),
+      false,
+      false
+    );
+    const selections = selectionsPrompt(attachments);
+    if (typeof content === 'string') {
+      return { prompt: content + selections };
+    }
+    let prompt = '';
+    const images: ImageContent[] = [];
+    for (const part of content) {
+      if (part.type === 'text') {
+        prompt += part.text;
+      } else if (part.type === 'file' && typeof part.data === 'string') {
+        images.push({
+          type: 'image',
+          data: part.data,
+          mimeType: part.mediaType
+        });
+      }
+    }
+    return { prompt: prompt + selections, images };
   }
 
   private async _compact(
