@@ -5,10 +5,10 @@ import {
   type AgentSessionEvent,
   type AgentSessionRuntime
 } from '@earendil-works/pi-coding-agent';
-import type { ImageContent, Model } from '@earendil-works/pi-ai';
+import type { Model } from '@earendil-works/pi-ai';
 import type { PersonaStatePayload } from '@jupyter-ai/persona-manager';
 import type { IAttachment, IChatModel, IMessage, IUser } from '@jupyter/chat';
-import { processAttachments } from '@jupyternaut/persona';
+import type { IDocumentManager } from '@jupyterlab/docmanager';
 import { Signal, type ISignal } from '@lumino/signaling';
 import fs from 'fs';
 import { findInitialModel } from 'pi-coding-agent-package/dist/core/model-resolver.js';
@@ -24,7 +24,7 @@ import {
 } from './extension';
 import type { PiHost } from './host';
 import { mimeBundles } from './mime';
-import { AGENT_DIR, DRIVE } from './vfs';
+import { AGENT_DIR, DRIVE, drivePath } from './vfs';
 
 const CHAT_SESSIONS_FILE = path.join(AGENT_DIR, 'jupyter-chats.json');
 /**
@@ -166,18 +166,62 @@ function textOf(content: unknown): string {
 }
 
 /**
- * The lines that the user selected in the attached files: the prompt has the
- * full files.
+ * The shared model of an open notebook, as far as `cellsPrompt` reads it.
  */
-function selectionsPrompt(attachments: IAttachment[]): string {
-  const lines = attachments.flatMap(attachment =>
-    attachment.type === 'file' && attachment.selection
-      ? [
-          `- ${attachment.value}, lines ${attachment.selection.start[0] + 1}-${attachment.selection.end[0] + 1}`
-        ]
-      : []
-  );
-  return lines.length ? `\n\nSelected by the user:\n${lines.join('\n')}` : '';
+interface INotebookSource {
+  sharedModel?: {
+    cells?: { id: string; cell_type: string; getSource(): string }[];
+  };
+}
+
+/**
+ * The source of the attached cells, from the open notebook: it can have
+ * changes that are not saved.
+ */
+function cellsPrompt(
+  attachment: IAttachment,
+  documentManager?: IDocumentManager
+): string | undefined {
+  const model = documentManager?.findWidget(attachment.value)?.context.model as
+    | INotebookSource
+    | undefined;
+  const cells = model?.sharedModel?.cells;
+  if (!cells || attachment.type !== 'notebook') {
+    return undefined;
+  }
+  const blocks = (attachment.cells ?? []).flatMap(({ id }) => {
+    const cell = cells.find(candidate => candidate.id === id);
+    return cell
+      ? [`Cell ${id} (${cell.cell_type}):\n\`\`\`\n${cell.getSource()}\n\`\`\``]
+      : [];
+  });
+  return blocks.length
+    ? `- ${drivePath(attachment.value)}:\n\n${blocks.join('\n\n')}`
+    : undefined;
+}
+
+function attachmentsPrompt(
+  attachments: IAttachment[] = [],
+  documentManager?: IDocumentManager
+): string {
+  if (!attachments.length) {
+    return '';
+  }
+  const lines = attachments.map(attachment => {
+    const file = drivePath(attachment.value);
+    if (attachment.type === 'notebook' && attachment.cells?.length) {
+      return (
+        cellsPrompt(attachment, documentManager) ??
+        `- ${file} (cells: ${attachment.cells.map(cell => cell.id).join(', ')})`
+      );
+    }
+    if (attachment.type === 'file' && attachment.selection) {
+      const { start, end, content } = attachment.selection;
+      return `- ${file}, lines ${start[0] + 1}-${end[0] + 1}:\n\n\`\`\`\n${content}\n\`\`\``;
+    }
+    return `- ${file}`;
+  });
+  return `\n\nAttached by the user:\n${lines.join('\n')}`;
 }
 
 /**
@@ -438,6 +482,8 @@ export class PiChatSession {
         ? metadata.model
         : undefined;
     const command = text.match(/^\/(new|compact|auto)(?:\s+(.*))?$/s);
+    const prompt =
+      text + attachmentsPrompt(message.attachments, this._host.documentManager);
     try {
       if (command?.[1] === 'new') {
         await runtime.newSession();
@@ -449,8 +495,7 @@ export class PiChatSession {
         return;
       }
       if (!command && session.isStreaming) {
-        const { prompt, images } = await this._content(text, message, session);
-        await session.prompt(prompt, { streamingBehavior: 'followUp', images });
+        await session.prompt(prompt, { streamingBehavior: 'followUp' });
         this._notice(
           'Queued: pi reads this message when the current run is complete.'
         );
@@ -470,9 +515,8 @@ export class PiChatSession {
         await this._compact(session, command[2]);
         return;
       }
-      const { prompt, images } = await this._content(text, message, session);
       this._saveSessionFile(session.sessionFile);
-      await session.prompt(prompt, { preflightResult: started, images });
+      await session.prompt(prompt, { preflightResult: started });
     } catch (error) {
       if (!this._disposed && !this._stopRequested) {
         this._error(errorText(error));
@@ -483,49 +527,6 @@ export class PiChatSession {
         this._resumeQueue();
       }
     }
-  }
-
-  /**
-   * The prompt of a message with its attachments, read as Jupyternaut reads
-   * them: the cells of the open notebooks, the files, and the images when the
-   * model reads images.
-   */
-  private async _content(
-    text: string,
-    message: IMessage,
-    session: AgentSession
-  ): Promise<{ prompt: string; images?: ImageContent[] }> {
-    const attachments = message.attachments ?? [];
-    const documentManager = this._host.documentManager;
-    if (!attachments.length || !documentManager) {
-      return { prompt: text };
-    }
-    const content = await processAttachments(
-      attachments,
-      documentManager,
-      text,
-      !!session.model?.input.includes('image'),
-      false,
-      false
-    );
-    const selections = selectionsPrompt(attachments);
-    if (typeof content === 'string') {
-      return { prompt: content + selections };
-    }
-    let prompt = '';
-    const images: ImageContent[] = [];
-    for (const part of content) {
-      if (part.type === 'text') {
-        prompt += part.text;
-      } else if (part.type === 'file' && typeof part.data === 'string') {
-        images.push({
-          type: 'image',
-          data: part.data,
-          mimeType: part.mediaType
-        });
-      }
-    }
-    return { prompt: prompt + selections, images };
   }
 
   private async _compact(
