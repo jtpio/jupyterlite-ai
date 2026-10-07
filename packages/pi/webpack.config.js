@@ -78,6 +78,7 @@ const REPLACEMENTS = [
 const timers = shim('node-timers.js');
 
 module.exports = {
+  node: { __dirname: 'mock' },
   resolve: {
     alias: { ...BUILTINS, ...PACKAGES }
   },
