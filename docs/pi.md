@@ -64,6 +64,9 @@ OpenRouter sign-in, or an OpenAI-compatible endpoint.
   Endpoint** in the command palette and enter the base URL (for example
   `http://localhost:11434/v1` for Ollama) and the model ids.
 
+With OpenRouter, pi also lists the models of the OpenRouter API that support
+tool calls and that its own model list does not have yet.
+
 The browser calls the provider directly, so the provider must accept requests
 from a web page (CORS). Anthropic, OpenAI, Google, Mistral, OpenRouter, Groq,
 xAI, DeepSeek, Together and Hugging Face do. For Ollama, allow the origin of
