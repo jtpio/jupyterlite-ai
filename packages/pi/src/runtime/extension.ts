@@ -17,7 +17,7 @@ import type { IMcpManager } from 'jupyter-mcp-manager';
 
 import { modelView } from './mime';
 import { cockleOperations, type ShellRunner } from './shell';
-import { DRIVE } from './vfs';
+import { toContentsPath } from './vfs';
 
 /**
  * A user decision on a tool call.
@@ -215,10 +215,8 @@ function commandInput(params: unknown): unknown {
   }
   const converted = Object.entries(args).map(([key, value]) => [
     key,
-    PATH_ARGUMENT.test(key) &&
-    typeof value === 'string' &&
-    (value === DRIVE || value.startsWith(`${DRIVE}/`))
-      ? value.slice(DRIVE.length + 1)
+    PATH_ARGUMENT.test(key) && typeof value === 'string'
+      ? (toContentsPath(value) ?? value)
       : value
   ]);
   return { ...(params as object), args: Object.fromEntries(converted) };

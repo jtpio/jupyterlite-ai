@@ -17,7 +17,7 @@ import { minimatch } from 'minimatch';
 import { resolveToCwd } from 'pi-coding-agent-package/dist/core/tools/path-utils.js';
 import path from 'path';
 
-import { AGENT_DIR, DRIVE } from './vfs';
+import { AGENT_DIR, drivePath, toContentsPath } from './vfs';
 
 const IMAGE_TYPES: Record<string, string> = {
   '.gif': 'image/gif',
@@ -54,23 +54,6 @@ const PROTECTED_FILES = new Set([
   'models.json',
   'models-store.json'
 ]);
-
-/**
- * The contents path of an absolute pi path, or null outside the drive.
- */
-function toContentsPath(absolutePath: string): string | null {
-  const normalized = path.posix.normalize(absolutePath).replace(/\/$/, '');
-  if (normalized === DRIVE) {
-    return '';
-  }
-  return normalized.startsWith(`${DRIVE}/`)
-    ? normalized.slice(DRIVE.length + 1)
-    : null;
-}
-
-function drivePath(contentsPath: string): string {
-  return contentsPath ? `${DRIVE}/${contentsPath}` : DRIVE;
-}
 
 const FS_ERRORS = {
   EACCES: 'permission denied',

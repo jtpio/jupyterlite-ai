@@ -14,6 +14,23 @@ export const AGENT_DIR = process.env.PI_CODING_AGENT_DIR!;
  */
 export const DRIVE = '/drive';
 
+/**
+ * The contents path of an absolute pi path, or null outside the drive.
+ */
+export function toContentsPath(absolutePath: string): string | null {
+  const normalized = path.posix.normalize(absolutePath).replace(/\/$/, '');
+  if (normalized === DRIVE) {
+    return '';
+  }
+  return normalized.startsWith(`${DRIVE}/`)
+    ? normalized.slice(DRIVE.length + 1)
+    : null;
+}
+
+export function drivePath(contentsPath: string): string {
+  return contentsPath ? `${DRIVE}/${contentsPath}` : DRIVE;
+}
+
 const DATABASE = 'jupyternaut-pi';
 /**
  * One record for each file of the agent folder, keyed by its path.

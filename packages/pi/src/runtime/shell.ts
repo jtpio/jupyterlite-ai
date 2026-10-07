@@ -5,6 +5,8 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { CommandRegistry } from '@lumino/commands';
 
+import { DRIVE } from './vfs';
+
 const SHELL_COMMANDS = {
   execute: '@jupyterlite/terminal:execute-shell',
   start: '@jupyterlite/terminal:start-shell',
@@ -228,7 +230,7 @@ export class ShellRunner {
       const starting = (async () => {
         const { shellName } = (await this._commands.execute(
           SHELL_COMMANDS.start,
-          { cwd: '/drive' }
+          { cwd: DRIVE }
         )) as { shellName: string };
         if (generation !== this._generation) {
           void this._abandon(shellName);
