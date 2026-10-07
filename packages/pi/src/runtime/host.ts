@@ -3,7 +3,6 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   createEditToolDefinition,
-  createFindToolDefinition,
   createLsToolDefinition,
   createMcpExtension,
   createReadToolDefinition,
@@ -24,13 +23,14 @@ import type { IMcpManager } from 'jupyter-mcp-manager';
 import path from 'path';
 import { collectSettingsDiagnostics } from 'pi-coding-agent-package/dist/core/settings-diagnostics.js';
 
-import { createGrepTool, DriveOperations } from './drive';
+import { createFindTool, createGrepTool, DriveOperations } from './drive';
 import {
   JUPYTER_INSTRUCTIONS,
   jupyterExtension,
-  type ApprovalHandler
+  type ApprovalHandler,
+  type IAutoMode
 } from './extension';
-import { keepBrowserSignIns } from './providers';
+import { adaptProviders } from './providers';
 import { createCockleBashTool, hasCockleShell, ShellRunner } from './shell';
 import {
   AGENT_DIR,
@@ -48,11 +48,24 @@ const CONFIG_FILES = new Set(['auth.json', 'models.json', 'settings.json']);
  * Outside the agent folder: the folder is saved in IndexedDB.
  */
 const MCP_LOG = '/tmp/pi-mcp.log';
+const EXECUTE_IN_KERNEL = 'jupyterlab-ai-commands:execute-in-kernel';
+
+/**
+ * The reads of `fs.promises` on the JupyterLab files (see shims/fs.cjs).
+ */
+interface IDriveReader {
+  access(absolutePath: string): Promise<void>;
+  readFile(
+    absolutePath: string,
+    options?: BufferEncoding | { encoding?: BufferEncoding | null }
+  ): Promise<Buffer | string>;
+}
 
 export interface IRuntimeOptions {
   cwd: string;
   sessionManager: SessionManager;
   approve: ApprovalHandler;
+  auto: IAutoMode;
   /**
    * Instructions added for this front-end (terminal or chat).
    */
@@ -72,6 +85,16 @@ export class PiHost {
     this._operations = new DriveOperations(contents, {
       onWrite: contentsPath => this._revert(contentsPath)
     });
+    const operations = this._operations;
+    (fs as unknown as { drive: IDriveReader }).drive = {
+      access: operations.access,
+      async readFile(absolutePath, options) {
+        const data = await operations.readFile(absolutePath);
+        const encoding =
+          typeof options === 'string' ? options : options?.encoding;
+        return encoding ? data.toString(encoding) : data;
+      }
+    };
     this.ready = restoreAgentDir();
     onRemoteChange(files => {
       if (files.some(file => CONFIG_FILES.has(path.posix.basename(file)))) {
@@ -137,8 +160,11 @@ export class PiHost {
                 shell: options.shell,
                 mcpManager,
                 approve: options.approve,
+                auto: options.auto,
                 onReload: () => this._mirror.sync(cwd, skillFolders),
-                onBash: () => void this._revertChanged()
+                onBash: () => void this._revertChanged(),
+                interrupt: (commandId, args) =>
+                  void this._interrupt(commandId, args)
               })
             },
             {
@@ -170,7 +196,7 @@ export class PiHost {
             .filter(folder => fs.existsSync(folder))
         }
       });
-      keepBrowserSignIns(services.modelRuntime);
+      adaptProviders(services.modelRuntime);
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
@@ -189,11 +215,11 @@ export class PiHost {
   private _tools(cwd: string, shell?: ShellRunner): ToolDefinition[] {
     const operations = this._operations;
     return [
-      createReadToolDefinition(cwd, { operations, autoResizeImages: false }),
+      createReadToolDefinition(cwd, { operations }),
       createWriteToolDefinition(cwd, { operations }),
       createEditToolDefinition(cwd, { operations }),
       createLsToolDefinition(cwd, { operations }),
-      createFindToolDefinition(cwd, { operations }),
+      createFindTool(cwd, operations),
       createGrepTool(cwd, operations),
       ...(shell ? [createCockleBashTool(cwd, shell)] : [])
     ] as ToolDefinition[];
@@ -208,6 +234,36 @@ export class PiHost {
     return folders
       .map(folder => folder.replace(/^\/+|\/+$/g, ''))
       .filter(folder => folder && folder !== '.agents/skills');
+  }
+
+  /**
+   * Interrupt the kernel of a stopped `execute-in-kernel` call, unless a
+   * notebook or a console uses the kernel: it can run the code of the user.
+   */
+  private async _interrupt(
+    commandId: string,
+    args: Record<string, unknown>
+  ): Promise<void> {
+    const { kernelId } = args;
+    if (commandId !== EXECUTE_IN_KERNEL || typeof kernelId !== 'string') {
+      return;
+    }
+    const { kernels, sessions } = this._options.app.serviceManager;
+    const model = await kernels.findById(kernelId);
+    if (
+      !model ||
+      [...sessions.running()].some(session => session.kernel?.id === kernelId)
+    ) {
+      return;
+    }
+    const kernel = kernels.connectTo({ model });
+    try {
+      await kernel.interrupt();
+    } catch (error) {
+      console.warn('pi: cannot interrupt the kernel', error);
+    } finally {
+      kernel.dispose();
+    }
   }
 
   /**

@@ -48,6 +48,7 @@ const BUILTINS = {
   string_decoder: require.resolve('string_decoder/'),
   'timers/promises': shim('timers-promises.cjs'),
   url: shim('url.cjs'),
+  util: shim('util.cjs'),
   worker_threads: shim('empty.cjs'),
   zlib: shim('empty.cjs')
 };
@@ -81,7 +82,8 @@ module.exports = {
     alias: { ...BUILTINS, ...PACKAGES }
   },
   module: {
-    parser: { javascript: { url: false } }
+    parser: { javascript: { url: false } },
+    rules: [{ test: /photon_rs_bg\.wasm$/, type: 'asset/resource' }]
   },
   plugins: [
     new NormalModuleReplacementPlugin(/^node:/, resource => {

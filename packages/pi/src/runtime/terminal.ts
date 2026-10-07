@@ -44,6 +44,7 @@ Run the pi coding agent in this terminal.
 
 Options:
   -c, --continue   Continue the most recent session of this directory
+  --auto           Run the tool calls without asking (/auto in pi)
   -h, --help       Show this help
 `;
 
@@ -289,7 +290,9 @@ export async function runTerminal(
     context.stdout.write(USAGE.replace(/\n/g, '\r\n'));
     return 0;
   }
-  const unknown = flags.find(flag => !['-c', '--continue'].includes(flag));
+  const unknown = flags.find(
+    flag => !['-c', '--continue', '--auto'].includes(flag)
+  );
   if (unknown) {
     context.stderr.write(`pi: unknown option ${unknown}\r\n`);
     return 2;
@@ -318,10 +321,11 @@ export async function runTerminal(
   try {
     runtime = await host.createRuntime({
       cwd,
-      sessionManager: flags.length
+      sessionManager: flags.some(flag => flag === '-c' || flag === '--continue')
         ? SessionManager.continueRecent(cwd)
         : SessionManager.create(cwd),
       approve: terminalApproval,
+      auto: { enabled: flags.includes('--auto') },
       instructions: TERMINAL_INSTRUCTIONS,
       shell
     });

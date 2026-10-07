@@ -57,7 +57,9 @@ OpenRouter sign-in, or an OpenAI-compatible endpoint.
   OpenRouter in a new window. The sign-in needs a secure page (HTTPS or
   localhost).
 - In the terminal, run `pi`, then `/login` to add a key or sign in with
-  OpenRouter, and `/model` to select the model.
+  OpenRouter, and `/model` to select the model. In the model list, Enter
+  selects the model for the session, `ctrl+s` also makes it the default model
+  of the new sessions.
 - For Ollama, LM Studio, vLLM or a proxy, run **Pi: Add an OpenAI-Compatible
   Endpoint** in the command palette and enter the base URL (for example
   `http://localhost:11434/v1` for Ollama) and the model ids.
@@ -74,13 +76,16 @@ the site with the `OLLAMA_ORIGINS` environment variable.
 3. Send a message.
 
 The model menu next to the persona lists the models that have credentials; the
-thinking level appears for the models that can reason. Each chat has its own pi
-session, which is restored when the chat opens again.
+thinking level appears for the models that can reason. A model or thinking
+level selected in these menus also becomes the default of the new pi sessions,
+in the chats and in the terminal. Each chat has its own pi session, which is
+restored when the chat opens again.
 
 | Message         | Effect                                     |
 | --------------- | ------------------------------------------ |
 | `/new`          | Start a new pi session in this chat        |
 | `/compact`      | Summarize the conversation to save context |
+| `/auto`         | Turn the auto mode on or off (see Tools)   |
 | `/skill:<name>` | Run a skill                                |
 | `/<template>`   | Expand a prompt template                   |
 
@@ -95,6 +100,7 @@ to run a shell command, `escape` to interrupt, `ctrl+d` to exit.
 | -------------- | ------------------------------------------------------------- |
 | `pi`           | Start a new session in the current directory (under `/drive`) |
 | `pi -c`        | Continue the most recent session of the current directory     |
+| `pi --auto`    | Start pi in auto mode (see Tools)                             |
 | `pi <message>` | Start a session with a first message                          |
 
 The sessions of the chats have a folder of their own: `pi -c` does not
@@ -131,6 +137,11 @@ allow** applies to one tool (for `execute_command`, to one JupyterLab command)
 until the session ends. A rejection stops the run: pi does not run the other
 tool calls of the same answer, so you can tell pi what to do instead. A call
 that ran before the rejection is not undone.
+
+In auto mode, pi runs all the tool calls without asking. Send `/auto` to turn
+it on or off (`/auto on` and `/auto off` also work), in the chat or in the
+terminal, where the footer shows "auto mode". The auto mode stays on after
+`/new`, until the chat closes, pi exits or the page reloads.
 
 ## Context and skills
 
@@ -171,7 +182,6 @@ key list.
   ChatGPT, the model calls). `/share` and `/bug` do not work.
 - Pi extensions and packages from files (`.pi/extensions`, the packages of the
   settings) do not load in the browser, and the pi examples are not included.
-- Images are sent to the model as they are, without resizing.
 - `/export` and `/import` do not work with the JupyterLab files, and the `@`
   file suggestions do not list the JupyterLab files.
 - xterm.js sends Alt+Up and Alt+Down as Ctrl+Up and Ctrl+Down, so the pi keys

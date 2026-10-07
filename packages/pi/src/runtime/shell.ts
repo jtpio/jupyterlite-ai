@@ -14,17 +14,26 @@ const SHELL_COMMANDS = {
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const CD_TIMEOUT_MS = 10000;
 
-const ANSI_PATTERN =
+export const ANSI_PATTERN =
   // eslint-disable-next-line no-control-regex
   /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
 
 const COCKLE_DESCRIPTION =
   'Execute a command line in cockle, the in-browser shell of JupyterLite (WebAssembly builds of common tools), in the current working directory. ' +
-  'Pipes (|), sequential separators (;) and file redirections (>, >>, 2>, <) are supported. ' +
-  'Not supported: && and ||, command substitution ($(...) or backticks), $VAR expansion, 2>&1, python, node, pip or network access. ' +
+  'Pipes (|), command lists (;, && and ||) and file redirections (>, >>, 2>, <) are supported. ' +
+  'Not supported: command substitution ($(...) or backticks), $VAR expansion, 2>&1, python, node, pip or network access. ' +
   'Commands read an empty stdin. ' +
   'Available commands include the coreutils (ls, cat, head, tail, wc, mkdir, cp, mv, rm, touch, sort, uniq, tr, cut, seq, date, stat...), grep, sed, tree and git; run "cockle-config command" to list them all. ' +
   'Returns stdout and stderr. Optionally provide a timeout in seconds.';
+
+interface IShellPart {
+  /**
+   * How the part runs after the part before: always, on success or on
+   * failure.
+   */
+  operator: ';' | '&&' | '||';
+  code: string;
+}
 
 interface IShellResult {
   success: boolean;
@@ -128,6 +137,52 @@ function withEmptyStdin(code: string): string {
 }
 
 /**
+ * The parts of a command line with `&&` or `||`, which cockle does not run:
+ * each part runs on its own, after the operator that joins it to the part
+ * before. Null for a line without them, or with a heredoc.
+ */
+function andOrParts(code: string): IShellPart[] | null {
+  const parts: IShellPart[] = [];
+  let part = '';
+  let operator: IShellPart['operator'] = ';';
+  let quoted = '';
+  let found = false;
+  const end = (next: IShellPart['operator']) => {
+    if (part.trim()) {
+      parts.push({ operator, code: part });
+      part = '';
+      operator = next;
+    } else if (next !== ';') {
+      operator = next;
+    }
+  };
+  for (let i = 0; i < code.length; i++) {
+    const char = code[i];
+    if (quoted) {
+      quoted = char === quoted ? '' : quoted;
+    } else if (char === "'" || char === '"') {
+      quoted = char;
+    } else if (code.startsWith('<<', i)) {
+      return null;
+    } else if (code.startsWith('&&', i) || code.startsWith('||', i)) {
+      end(code.slice(i, i + 2) as IShellPart['operator']);
+      found = true;
+      i++;
+      continue;
+    } else if (
+      char === ';' ||
+      (char === '\n' && !part.endsWith('\\') && !/\|\s*$/.test(part))
+    ) {
+      end(';');
+      continue;
+    }
+    part += char;
+  }
+  end(';');
+  return found ? parts : null;
+}
+
+/**
  * Settle with the promise, or reject with `aborted` when the signal aborts
  * first.
  */
@@ -225,9 +280,32 @@ export class ShellRunner {
           `Cannot change to the working directory ${cwd}: ${moved.output.trim() || moved.message}`
         );
       }
-      const rewritten = withEmptyStdin(code);
-      const result = await this._run(shellName, rewritten, timeoutMs);
-      return { ...result, output: restoreEcho(result.output, code, rewritten) };
+      const parts = andOrParts(code) ?? [{ operator: ';', code }];
+      const deadline = Date.now() + timeoutMs;
+      let output = '';
+      let last: IShellResult | undefined;
+      for (const part of parts) {
+        const failed = last?.exitCode !== 0;
+        if (
+          last &&
+          ((part.operator === '&&' && failed) ||
+            (part.operator === '||' && !failed))
+        ) {
+          continue;
+        }
+        check();
+        const rewritten = withEmptyStdin(part.code);
+        last = await this._run(
+          shellName,
+          rewritten,
+          Math.max(1, deadline - Date.now())
+        );
+        output += restoreEcho(last.output, part.code, rewritten);
+        if (last.status === 'timeout') {
+          break;
+        }
+      }
+      return { ...last!, output };
     };
     const result = abortable(previous.then(run), signal, () => {
       if (shellName) {

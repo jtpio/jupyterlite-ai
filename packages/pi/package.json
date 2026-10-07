@@ -65,6 +65,7 @@
     "@mui/icons-material": "^7",
     "@mui/material": "^7",
     "@noble/hashes": "^2.0.1",
+    "@silvia-odwyer/photon-node": "^0.3.4",
     "buffer": "^6.0.3",
     "events": "^3.3.0",
     "jupyter-chat-components": "^0.6.0",

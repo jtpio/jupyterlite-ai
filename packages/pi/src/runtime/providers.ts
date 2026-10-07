@@ -111,21 +111,61 @@ const openRouterOAuth: OAuthAuth = {
 };
 
 /**
- * Keep the account sign-ins that work in a web page: only OpenRouter. The
- * providers of the others, also the model API for a ChatGPT sign-in, do not
- * accept requests from a web page (CORS). The OpenRouter sign-in uses
- * WebCrypto, which needs a secure context.
+ * The OpenAI-compatible settings of the Claude models of OpenRouter, as in
+ * the `~anthropic/*-latest` models of the pi catalog.
  */
-export function keepBrowserSignIns(runtime: ModelRuntime): void {
+const OPENROUTER_CLAUDE_COMPAT = {
+  supportsDeveloperRole: false,
+  thinkingFormat: 'openrouter',
+  supportsStrictMode: true,
+  cacheControlFormat: 'anthropic',
+  sendSessionAffinityHeaders: true
+};
+
+/**
+ * A model that works in a web page. OpenRouter does not accept the headers
+ * of the Anthropic API from a web page (CORS): its Claude models use the
+ * OpenAI-compatible API.
+ */
+function browserModel<T extends { provider: string; api: string }>(
+  model: T
+): T {
+  if (model.provider !== 'openrouter' || model.api !== 'anthropic-messages') {
+    return model;
+  }
+  return {
+    ...model,
+    api: 'openai-completions',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    compat: OPENROUTER_CLAUDE_COMPAT
+  };
+}
+
+/**
+ * Adapt the providers to a web page. Keep the account sign-ins that work
+ * there: only OpenRouter. The providers of the others, also the model API
+ * for a ChatGPT sign-in, do not accept requests from a web page (CORS). The
+ * OpenRouter sign-in uses WebCrypto, which needs a secure context.
+ */
+export function adaptProviders(runtime: ModelRuntime): void {
   for (const provider of runtime.getProviders()) {
-    if (provider.auth.oauth) {
-      const oauth =
-        provider.id === 'openrouter' && window.isSecureContext
-          ? openRouterOAuth
-          : undefined;
+    if (provider.id === 'openrouter') {
+      const { getModels, getAllModels } = provider;
       runtime.registerNativeProvider({
         ...provider,
-        auth: { ...provider.auth, oauth }
+        auth: {
+          ...provider.auth,
+          oauth: window.isSecureContext ? openRouterOAuth : undefined
+        },
+        getModels: () => getModels().map(browserModel),
+        ...(getAllModels && {
+          getAllModels: () => getAllModels().map(browserModel)
+        })
+      });
+    } else if (provider.auth.oauth) {
+      runtime.registerNativeProvider({
+        ...provider,
+        auth: { ...provider.auth, oauth: undefined }
       });
     }
   }
@@ -177,7 +217,7 @@ async function login(method: 'api_key' | 'oauth'): Promise<void> {
     authPath: path.join(AGENT_DIR, 'auth.json'),
     modelsPath: MODELS_FILE
   });
-  keepBrowserSignIns(runtime);
+  adaptProviders(runtime);
   const providers = runtime
     .getProviders()
     .filter(provider =>

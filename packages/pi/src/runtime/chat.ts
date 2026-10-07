@@ -14,7 +14,13 @@ import { findInitialModel } from 'pi-coding-agent-package/dist/core/model-resolv
 import type { IToolCallsEntry } from 'jupyter-chat-components';
 import path from 'path';
 
-import type { ApprovalDecision, IApprovalRequest } from './extension';
+import {
+  AUTO_COMMAND,
+  setAutoMode,
+  type ApprovalDecision,
+  type IApprovalRequest,
+  type IAutoMode
+} from './extension';
 import type { PiHost } from './host';
 import { mimeBundles } from './mime';
 import { AGENT_DIR, DRIVE } from './vfs';
@@ -30,7 +36,7 @@ const MAX_DISPLAYED_OUTPUT = 5000;
 const THINKING_SETTING = 'thinking';
 
 const CHAT_INSTRUCTIONS =
-  'You run in pi, the coding agent, as a persona of a Jupyter chat. Your answers are rendered as markdown in the chat panel.';
+  'You run in pi, the coding agent, as a persona of a Jupyter chat. Your answers are rendered as markdown in the chat panel. The rich outputs (plots, tables, HTML) of jupyterlab-ai-commands:execute-in-kernel are shown in the chat: to show one, run the code that makes it.';
 
 const NO_MODEL_MESSAGE =
   'pi has no model to use. Add an API key with the "Pi: Set a Model Provider API Key" command, or a model server with the "Pi: Add an OpenAI-Compatible Endpoint" command (in the command palette).';
@@ -212,6 +218,7 @@ export class PiChatSession {
       cwd: DRIVE,
       sessionManager,
       approve: request => this._approve(request),
+      auto: this._auto,
       instructions: CHAT_INSTRUCTIONS,
       shell: this._shell
     });
@@ -298,6 +305,7 @@ export class PiChatSession {
       slash_commands: [
         { name: 'new', description: 'Start a new pi session' },
         { name: 'compact', description: 'Summarize the conversation' },
+        AUTO_COMMAND,
         ...session.promptTemplates.map(template => ({
           name: template.name,
           description: template.description
@@ -350,7 +358,7 @@ export class PiChatSession {
       return;
     }
     try {
-      if (await this._applySelection(session, selection)) {
+      if (await this._applySelection(session, selection, true)) {
         this._stateChanged.emit();
       }
     } catch (error) {
@@ -431,12 +439,16 @@ export class PiChatSession {
       metadata.to_persona === this._persona.username
         ? metadata.model
         : undefined;
-    const command = text.match(/^\/(new|compact)(?:\s+(.*))?$/s);
+    const command = text.match(/^\/(new|compact|auto)(?:\s+(.*))?$/s);
     const prompt = text + attachmentsPrompt(message.attachments);
     try {
       if (command?.[1] === 'new') {
         await runtime.newSession();
         this._notice('Started a new pi session.');
+        return;
+      }
+      if (command?.[1] === AUTO_COMMAND.name) {
+        this._notice(setAutoMode(this._auto, command[2]));
         return;
       }
       if (!command && session.isStreaming) {
@@ -515,11 +527,14 @@ export class PiChatSession {
 
   /**
    * Apply a model selection, matching the model by its key: provider ids may
-   * contain '/'. Resolves with whether the session changed.
+   * contain '/'. The menus have no "set as default": a choice in the menus
+   * persists as the default of the new sessions. Resolves with whether the
+   * session changed.
    */
   private async _applySelection(
     session: AgentSession,
-    selection?: PiChatSession.ISelection
+    selection?: PiChatSession.ISelection,
+    persist = false
   ): Promise<boolean> {
     let changed = false;
     const id = selection?.id;
@@ -527,13 +542,13 @@ export class PiChatSession {
       const available = await session.modelRuntime.getAvailable();
       const model = available.find(candidate => modelKey(candidate) === id);
       if (model) {
-        await session.setModel(model);
+        await session.setModel(model, { persist });
         changed = true;
       }
     }
     const level = selection?.settings?.[THINKING_SETTING];
     if (level && level !== session.thinkingLevel) {
-      session.setThinkingLevel(level as never);
+      session.setThinkingLevel(level as never, { persist });
       changed = true;
     }
     return changed;
@@ -943,6 +958,7 @@ export class PiChatSession {
   private _dispatch = Promise.resolve();
   private _lastRun?: AgentEndEvent['messages'];
   private _stopRequested = false;
+  private _auto: IAutoMode = { enabled: false };
   private _busy = false;
   private _disposed = false;
   private _stateChanged = new Signal<this, void>(this);

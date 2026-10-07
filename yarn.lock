@@ -4279,6 +4279,7 @@ __metadata:
     "@mui/icons-material": ^7
     "@mui/material": ^7
     "@noble/hashes": ^2.0.1
+    "@silvia-odwyer/photon-node": ^0.3.4
     "@types/node": ^24.3.0
     "@types/react": ^18.0.26
     buffer: ^6.0.3
@@ -5269,7 +5270,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@silvia-odwyer/photon-node@npm:0.3.4":
+"@silvia-odwyer/photon-node@npm:0.3.4, @silvia-odwyer/photon-node@npm:^0.3.4":
   version: 0.3.4
   resolution: "@silvia-odwyer/photon-node@npm:0.3.4"
   checksum: bae276351c7d731fcbbd25f01cce0663362f86d58ecb5aab5ad43514301e2691a477635de1d8f2e3294b6a22cf04600070b8007fe9a333fc7d0db3d4be15cb6a

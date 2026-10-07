@@ -108,6 +108,22 @@ fs.openSync = function (file, flags, ...rest) {
   return fd;
 };
 
+/**
+ * pi also reads the JupyterLab files outside its tools, for example for the
+ * preview of an edit: the host sets `fs.drive` to read `/drive` with the
+ * contents API.
+ */
+for (const name of ['access', 'readFile']) {
+  const local = fs.promises[name];
+  fs.promises[name] = function (target, ...args) {
+    const resolved = resolve(target);
+    if (fs.drive && /^\/drive(\/|$)/.test(resolved ?? '')) {
+      return fs.drive[name](resolved, ...args);
+    }
+    return local.call(this, target, ...args);
+  };
+}
+
 vol.fromJSON({
   '/pi/package.json': JSON.stringify({
     name: piPackage.name,

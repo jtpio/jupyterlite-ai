@@ -1,4 +1,5 @@
 import {
+  createFindToolDefinition,
   createGrepToolDefinition,
   DEFAULT_MAX_BYTES,
   formatSize,
@@ -441,6 +442,21 @@ export namespace DriveOperations {
      */
     onWrite?: (contentsPath: string) => void;
   }
+}
+
+/**
+ * The find tool of pi on the drive, which does not read .gitignore.
+ */
+export function createFindTool(
+  cwd: string,
+  operations: DriveOperations
+): ReturnType<typeof createFindToolDefinition> {
+  const tool = createFindToolDefinition(cwd, { operations });
+  return {
+    ...tool,
+    description: tool.description.replace(' Respects .gitignore.', ''),
+    promptSnippet: 'Find files by glob pattern'
+  };
 }
 
 /**

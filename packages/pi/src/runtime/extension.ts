@@ -13,7 +13,9 @@ import type {
 } from '@jupyternaut/agent';
 import type { IMcpManager } from 'jupyter-mcp-manager';
 
+import { modelView } from './mime';
 import { cockleOperations, type ShellRunner } from './shell';
+import { DRIVE } from './vfs';
 
 /**
  * A user decision on a tool call.
@@ -35,6 +37,14 @@ export type ApprovalHandler = (
   ctx: ExtensionContext
 ) => Promise<ApprovalDecision>;
 
+/**
+ * The auto mode of a terminal or a chat: while it is on, pi runs the tool
+ * calls without asking. It lasts across the sessions of the front-end.
+ */
+export interface IAutoMode {
+  enabled: boolean;
+}
+
 export interface IJupyterExtensionOptions {
   toolRegistry?: IToolRegistry;
   settingsModel?: IAISettingsModel;
@@ -44,6 +54,7 @@ export interface IJupyterExtensionOptions {
    */
   mcpManager?: IMcpManager;
   approve: ApprovalHandler;
+  auto: IAutoMode;
   /**
    * Called before pi reloads its resources (`/reload`).
    */
@@ -52,7 +63,16 @@ export interface IJupyterExtensionOptions {
    * Called after each bash tool call, which can change files.
    */
   onBash?: () => void;
+  /**
+   * Interrupts the kernel of a JupyterLab command that pi stops.
+   */
+  interrupt?: InterruptHandler;
 }
+
+export type InterruptHandler = (
+  commandId: string,
+  args: Record<string, unknown>
+) => void;
 
 /**
  * Tools of the Jupyternaut registry that pi covers itself (skills).
@@ -66,16 +86,50 @@ const GUARDED_TOOLS = new Set(['bash', 'edit', 'write']);
 
 const MAX_OUTPUT_CHARS = 50000;
 
+export const AUTO_COMMAND = {
+  name: 'auto',
+  description: 'Run the tool calls without asking (on, off)'
+};
+
+/**
+ * Apply the argument of `/auto` (`on`, `off`, or none to toggle) and return
+ * the notice for the user.
+ */
+export function setAutoMode(auto: IAutoMode, arg = ''): string {
+  const value = arg.trim().toLowerCase();
+  if (value && value !== 'on' && value !== 'off') {
+    return `Unknown argument "${arg.trim()}": send /auto, /auto on or /auto off.`;
+  }
+  auto.enabled = value ? value === 'on' : !auto.enabled;
+  return auto.enabled
+    ? 'Auto mode is on: pi runs the tool calls without asking. Send /auto again to turn it off.'
+    : 'Auto mode is off: pi asks again before the tool calls that need an approval.';
+}
+
 /**
  * Instructions added to the pi system prompt.
  */
 export const JUPYTER_INSTRUCTIONS = `You are running inside JupyterLab (or JupyterLite), in the web browser of the user.
 - ${'`'}/drive${'`'} is the root of the JupyterLab file browser. The read, write, edit, ls, find and grep tools work on these files; use paths under /drive or relative to the working directory.
-- Notebooks (.ipynb) are JSON documents: read them as JSON, and write valid nbformat 4 JSON. Prefer the JupyterLab commands to edit and run notebooks that are open.
-- Use discover_commands, then execute_command, to drive JupyterLab: open files, create notebooks, insert and run cells, run code in a kernel (Python runs in a kernel, not in the shell).
-- When it is available, the bash tool runs in cockle, a shell in the browser with a limited syntax and no network access.
 - The MCP servers come from the MCP settings of JupyterLab: pi does not read mcp.json.
 - The pi docs describe pi in Node.js. In the browser, the pi examples are not available, and pi extensions and packages from files, the account sign-in of /login (except OpenRouter), /share and /bug do not work.`;
+
+/**
+ * Rules of the Jupyternaut registry tools, in the pi system prompt.
+ */
+const TOOL_GUIDELINES: Record<string, string[]> = {
+  discover_commands: [
+    'Call discover_commands with the query "jupyterlab-ai-commands" to get the commands for files, notebooks and kernels. For other commands, use one or two keywords: each word must be in the id, label or caption of a command (for example "terminal").'
+  ],
+  execute_command: [
+    'Never guess a command id: use an id that discover_commands returned, and give args as a JSON object that follows the args schema of the command.',
+    'JupyterLab commands take paths relative to the root of the file browser, without /drive (/drive/data/a.ipynb is data/a.ipynb), and not relative to the working directory.',
+    'To run code (Python or another kernel language), start a kernel with jupyterlab-ai-commands:start-kernel (or use one from jupyterlab-ai-commands:list-kernels), then run the code with jupyterlab-ai-commands:execute-in-kernel and its kernelId. Bash cannot run Python. Use a notebook only when the user asks for one or the work must be kept.',
+    'Create, change and run notebooks with the jupyterlab-ai-commands notebook commands (create-notebook, get-notebook-info, add-cell, set-cell-content, run-cell, get-cell-info), with notebookPath: without it, they act on the active notebook. In a new notebook, add-cell replaces the empty first cell. Do not change the .ipynb JSON with write or edit.',
+    'Cell IDs, cell positions and execution counts (In [6]) are different: get the current cells of a notebook before you change them.',
+    'Read the result of each command (outputs, errors) before you say that a task is done.'
+  ]
+};
 
 function summarize(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {
@@ -142,9 +196,82 @@ async function settle(output: unknown): Promise<unknown> {
 }
 
 /**
+ * Arguments of the JupyterLab commands that hold a path, such as `path`,
+ * `notebookPath` or `cwd`.
+ */
+const PATH_ARGUMENT = /^cwd$|path$/i;
+
+/**
+ * The arguments of a JupyterLab command with contents paths: commands do not
+ * know the /drive paths of the pi tools.
+ */
+function commandInput(params: unknown): unknown {
+  const { args } = (params ?? {}) as { args?: unknown };
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return params;
+  }
+  const converted = Object.entries(args).map(([key, value]) => [
+    key,
+    PATH_ARGUMENT.test(key) &&
+    typeof value === 'string' &&
+    (value === DRIVE || value.startsWith(`${DRIVE}/`))
+      ? value.slice(DRIVE.length + 1)
+      : value
+  ]);
+  return { ...(params as object), args: Object.fromEntries(converted) };
+}
+
+/**
+ * The commands of a discover_commands result without their arguments, when
+ * the full result is too long.
+ */
+function commandList(output: unknown): string | undefined {
+  const commands = (output as { commands?: unknown } | null)?.commands;
+  if (!Array.isArray(commands)) {
+    return undefined;
+  }
+  const lines = commands.map(({ id, label }) =>
+    label ? `${id}: ${label}` : String(id)
+  );
+  return `${commands.length} commands. Call discover_commands with a query to get their arguments.\n${lines.join('\n')}`;
+}
+
+/**
+ * Settle with the promise, or reject when the signal aborts: a JupyterLab
+ * command cannot be cancelled.
+ */
+function abortable<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  onAbort: () => void
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      onAbort();
+      reject(new Error('Operation aborted'));
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+/**
  * A Jupyternaut registry tool (AI SDK) as a pi tool.
  */
-function bridgeTool(name: string, tool: ITool): ToolDefinition {
+function bridgeTool(
+  name: string,
+  tool: ITool,
+  interrupt?: InterruptHandler
+): ToolDefinition {
   const title = (tool as { metadata?: { title?: string } }).metadata?.title;
   const description =
     typeof tool.description === 'string' ? tool.description : name;
@@ -153,28 +280,40 @@ function bridgeTool(name: string, tool: ITool): ToolDefinition {
     label: title ?? name,
     description,
     promptSnippet: description.split(/(?<=\.)\s/)[0],
+    promptGuidelines: TOOL_GUIDELINES[name],
     parameters: inputJsonSchema(tool) as unknown as TSchema,
     async execute(toolCallId, params, signal) {
       if (!tool.execute) {
         throw new Error(`The tool ${name} cannot run in the browser`);
       }
-      const output = await settle(
-        await tool.execute(await parseInput(name, tool, params), {
-          toolCallId,
-          messages: [],
-          abortSignal: signal,
-          context: {}
-        })
-      );
+      const input = (
+        name === 'execute_command' ? commandInput(params) : params
+      ) as { commandId?: string; args?: Record<string, unknown> };
+      const run = async () =>
+        settle(
+          await tool.execute!(await parseInput(name, tool, input), {
+            toolCallId,
+            messages: [],
+            abortSignal: signal,
+            context: {}
+          })
+        );
+      const output = await abortable(run(), signal, () => {
+        if (name === 'execute_command' && input.commandId) {
+          interrupt?.(input.commandId, input.args ?? {});
+        }
+      });
+      const { value, images } = modelView(output);
       let text =
-        typeof output === 'string'
-          ? output
-          : (JSON.stringify(output) ?? 'Done');
+        typeof value === 'string' ? value : (JSON.stringify(value) ?? 'Done');
+      if (text.length > MAX_OUTPUT_CHARS && name === 'discover_commands') {
+        text = commandList(output) ?? text;
+      }
       if (text.length > MAX_OUTPUT_CHARS) {
         text = `${text.slice(0, MAX_OUTPUT_CHARS)}\n\n[Output truncated: ${text.length} characters]`;
       }
       return {
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text }, ...images],
         // The chat renders the MIME bundles of execute_command.
         details: name === 'execute_command' ? output : undefined,
         isError: (output as { success?: unknown } | null)?.success === false
@@ -263,6 +402,7 @@ export function jupyterExtension(
       const input = event.input as Record<string, unknown>;
       const scope = approvalScope(event.toolName, input);
       if (
+        options.auto.enabled ||
         allowed.has(scope) ||
         !(await needsApproval(event.toolName, input, event.toolCallId))
       ) {
@@ -288,6 +428,22 @@ export function jupyterExtension(
           reason: `The user rejected the ${event.toolName} call.`,
           terminate: true
         };
+      }
+    });
+
+    const showAuto = (ctx: ExtensionContext) =>
+      ctx.ui.setStatus('auto', options.auto.enabled ? 'auto mode' : undefined);
+    pi.on('session_start', (event, ctx) => showAuto(ctx));
+    pi.registerCommand(AUTO_COMMAND.name, {
+      description: AUTO_COMMAND.description,
+      getArgumentCompletions: prefix =>
+        ['on', 'off']
+          .filter(value => value.startsWith(prefix.trim()))
+          .map(value => ({ value, label: value })),
+      handler: async (args, ctx) => {
+        const notice = setAutoMode(options.auto, args);
+        showAuto(ctx);
+        ctx.ui.notify(notice, 'info');
       }
     });
 
@@ -354,7 +510,7 @@ export function jupyterExtension(
       }
       try {
         policies.set(name, tool.needsApproval);
-        pi.registerTool(bridgeTool(name, tool));
+        pi.registerTool(bridgeTool(name, tool, options.interrupt));
       } catch (error) {
         console.warn(`pi: cannot add the ${name} tool`, error);
       }
