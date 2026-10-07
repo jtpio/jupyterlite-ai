@@ -435,7 +435,8 @@ const persona: JupyterFrontEndPlugin<void> = {
 
 /**
  * Registers groupedToolCall callbacks to route tool call approval decisions
- * to the correct persona's agent manager.
+ * to the correct persona's agent manager. The decisions on the tool calls of
+ * other personas go to the previous callback.
  */
 const chatComponentsCallbacks: JupyterFrontEndPlugin<void> = {
   id: '@jupyternaut/persona:chat-components-callbacks',
@@ -460,22 +461,24 @@ const chatComponentsCallbacks: JupyterFrontEndPlugin<void> = {
       return model ? personaRegistry.get(model) : undefined;
     };
 
+    const callbacks = chatComponentsFactory.groupedToolCallCallbacks ?? {};
+    const previous = callbacks.toolCallPermissionDecision;
     chatComponentsFactory.groupedToolCallCallbacks = {
-      ...chatComponentsFactory.groupedToolCallCallbacks,
+      ...callbacks,
       toolCallPermissionDecision: (
         sessionId: string,
         toolCallId: string,
         optionId: string
       ) => {
         const agent = findPersona(sessionId)?.agentManager;
-        if (!agent) {
+        const decided =
+          optionId === 'approve'
+            ? agent?.approveToolCall(toolCallId)
+            : agent?.rejectToolCall(toolCallId);
+        if (decided) {
           return;
         }
-        if (optionId === 'approve') {
-          agent.approveToolCall(toolCallId);
-        } else {
-          agent.rejectToolCall(toolCallId);
-        }
+        return previous?.(sessionId, toolCallId, optionId);
       }
     };
   }

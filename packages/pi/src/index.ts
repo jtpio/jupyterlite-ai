@@ -100,26 +100,22 @@ const personaPlugin: JupyterFrontEndPlugin<void> = {
     chatTracker.forEach(attach);
     chatTracker.widgetAdded.connect((sender, panel) => attach(panel));
 
-    // Other personas set the permission callback of the tool call component
-    // when they activate: chain it once all plugins are active.
-    void app.restored.then(() => {
-      if (!componentsFactory) {
-        return;
-      }
-      const callbacks = componentsFactory.groupedToolCallCallbacks ?? {};
-      const previous = callbacks.toolCallPermissionDecision;
-      componentsFactory.groupedToolCallCallbacks = {
-        ...callbacks,
-        toolCallPermissionDecision: (sessionId, toolCallId, optionId) => {
-          if (
-            agent.loadedRuntime?.decideApproval(sessionId, toolCallId, optionId)
-          ) {
-            return;
-          }
-          return previous?.(sessionId, toolCallId, optionId);
+    if (!componentsFactory) {
+      return;
+    }
+    const callbacks = componentsFactory.groupedToolCallCallbacks ?? {};
+    const previous = callbacks.toolCallPermissionDecision;
+    componentsFactory.groupedToolCallCallbacks = {
+      ...callbacks,
+      toolCallPermissionDecision: (sessionId, toolCallId, optionId) => {
+        if (
+          agent.loadedRuntime?.decideApproval(sessionId, toolCallId, optionId)
+        ) {
+          return;
         }
-      };
-    });
+        return previous?.(sessionId, toolCallId, optionId);
+      }
+    };
   }
 };
 

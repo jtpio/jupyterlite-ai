@@ -609,14 +609,16 @@ export interface IAgentManager {
    * Approves a pending tool call.
    * @param toolCallId The tool call ID to approve
    * @param reason Optional reason for approval
+   * @returns Whether the tool call was pending in this agent
    */
-  approveToolCall(toolCallId: string, reason?: string): void;
+  approveToolCall(toolCallId: string, reason?: string): boolean;
   /**
    * Rejects a pending tool call.
    * @param toolCallId The tool call ID to reject
    * @param reason Optional reason for rejection
+   * @returns Whether the tool call was pending in this agent
    */
-  rejectToolCall(toolCallId: string, reason?: string): void;
+  rejectToolCall(toolCallId: string, reason?: string): boolean;
   /**
    * Generates AI response to user message using the agent.
    * Handles the complete execution cycle including tool calls.

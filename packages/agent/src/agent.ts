@@ -549,8 +549,9 @@ export class AgentManager implements IAgentManager {
    * Approves a pending tool call.
    * @param toolCallId The tool call ID to approve
    * @param reason Optional reason for approval
+   * @returns Whether the tool call was pending in this agent
    */
-  approveToolCall(toolCallId: string, reason?: string): void {
+  approveToolCall(toolCallId: string, reason?: string): boolean {
     const pending = this._pendingApprovals.get(toolCallId);
     if (pending) {
       pending.resolve(true, reason);
@@ -560,14 +561,16 @@ export class AgentManager implements IAgentManager {
         data: { toolCallId, approved: true }
       });
     }
+    return !!pending;
   }
 
   /**
    * Rejects a pending tool call.
    * @param toolCallId The tool call ID to reject
    * @param reason Optional reason for rejection
+   * @returns Whether the tool call was pending in this agent
    */
-  rejectToolCall(toolCallId: string, reason?: string): void {
+  rejectToolCall(toolCallId: string, reason?: string): boolean {
     const pending = this._pendingApprovals.get(toolCallId);
     if (pending) {
       pending.resolve(false, reason);
@@ -577,6 +580,7 @@ export class AgentManager implements IAgentManager {
         data: { toolCallId, approved: false }
       });
     }
+    return !!pending;
   }
 
   /**
