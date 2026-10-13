@@ -19,8 +19,8 @@ build:
           pip install "jupyterlab>=4.0.0,<5"
           jlpm install
           jlpm build:prod
-          uv python install
-          uv sync --locked --all-extras --dev --directory=demo
+          uv python install 3.14
+          uv sync --python 3.14 --locked --all-extras --dev --directory=demo
           mkdir -p demo/contents
           cp demo/README.md demo/contents/
           uv run --directory=demo jupyter lite build
